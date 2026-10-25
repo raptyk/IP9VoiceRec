@@ -1,35 +1,64 @@
 # CardputerVoiceRec
 
-Inteligentny dyktafon cyfrowy z kompresją audio (MP3/Shine), zapisem na kartę SD, systemem aktywacji głosem (VAS / VAD) z buforem pre-roll, adaptacyjną percentylową kalibracją szumów otoczenia oraz wbudowanym odtwarzaczem nagrań (Helix MP3) dla M5Stack Cardputer i Cardputer ADV (ESP32-S3).
+Dyktafon MP3 z aktywacją głosem, kalibracją mikrofonu i odtwarzaczem dla M5Stack Cardputer i Cardputer ADV (ESP32-S3).
+UI wzorowane na `../CardputerLGRemote` (te same klasy `App` / `Screen` / `ListScreen` / `painter`, ta sama paleta i układ).
 
-## Architektura i Założenia Projektu
+## Zasady
 
-- **Platforma**: PlatformIO, framework Arduino, Espressif ESP32-S3 (`board = esp32-s3-devkitc-1`, 240 MHz, 8 MB Flash, partycje `default_8MB.csv`).
-- **USB & Serial**: `-DARDUINO_USB_MODE=1` i `-DARDUINO_USB_CDC_ON_BOOT=1` – UART0 nie dotyka GPIO 43 (taktowanie mikrofonu/kodeka).
-- **Inicjalizacja Audio w M5Unified**:
-  - `M5.config()` musi mieć `cfg.internal_mic = true; cfg.internal_spk = true;`, aby `M5Unified` poprawnie przypisał piny i zarejestrował procedury startowe kodeka ES8311 (Cardputer ADV).
-  - Natychmiast po starcie `AudioModeManager::begin()` gasi oba peryferia (`Mic.end()`, `Speaker.end()`) w celu ochrony wspólnej linii zegarowej GPIO 43/41.
-- **Audio Half-Duplex Manager**:
-  - Mikrofon (`I2S_NUM_0`) i Głośnik (`I2S_NUM_1`) dzielą GPIO 43 (i GPIO 41 na ADV).
-  - Peryferia są rygorystycznie wykluczające się w czasie: przejście do `Record` zamyka głośnik i odczekuje 15 ms przed startem mikrofonu. Przejście do `Playback` zamyka mikrofon i odczekuje 15 ms przed startem głośnika.
-  - Wzmocnienie mikrofonu dostosowane do modelu: `magnification = 16` na PDM MEMS (standardowy Cardputer) oraz `magnification = 2` na ES8311 z analogowym PGA (Cardputer ADV) dla ochrony przed obcinaniem sygnału.
-- **Akwizycja Audio: Podwójne Buforowanie Ping-Pong DMA**:
-  - Obsługa przez `M5.Mic.setBufferReleaseCallback()` i dwa bufory `dmaBuf_[2][576]`.
-  - Sprzęt I2S DMA na bieżąco wypełnia bufor, a po jego zakończeniu wywołuje callback i powiadamia zadanie `AudioCaptureTask` przez `xTaskNotifyGive()`.
-  - Zadanie natychmiast re-armuje ten sam slot do kolejki DMA, dzięki czemu próbkowanie jest w 100% ciągłe i pozbawione jakichkolwiek przerw.
-- **Wielowątkowa Karta SD (SPI2_HOST / FSPI)**:
-  - Piny: SCK=40, MISO=39, MOSI=14, CS=12.
-  - Chroniona sprzętowym muteksem `SdStorage::lock() / unlock()` zapobiegającym kolizjom między zapisem MP3 na Core 0 a sprawdzaniem miejsca/listowaniem na Core 1.
-  - Bufor sektorowy 8 KB, zapis w blokach po 4096 B. Bezpieczny `flush()` przy przejściu w fazę ciszy VAS lub zakończeniu nagrywania.
-- **Silnik kompresji i dekompresji**:
-  - **Enkoder**: `libshine` (Fixed-point MP3 Encoder). Złota zasada: ramka $N = 576$ próbek (MPEG-2 Layer 3, 16 kHz mono, 48 kbps). 1 ramka PCM = dokładnie 1 ramka MP3 (216 B).
-  - **Dekoder**: `libhelix-mp3` (Fixed-point MP3 Decoder) z synchronizacją tempa rzeczywistego (`while (Speaker.isPlaying(0) != 0)`).
-- **Voice Activated System (VAS / VAD)**:
-  - DC-Blocker IIR 80 Hz na sprzętowym FPU ESP32-S3.
-  - Statystyczna percentylowa kalibracja szumów tła ($P_{40}$ / $P_{85}$) na próbie 2.5 s.
-  - Bufor kołowy Pre-Roll 360 ms (10 ramek po 576 próbek) eliminujący ucinanie pierwszej głoski.
-  - Histereza ataku/zwolnienia ($T_{\text{attack}}$ vs $T_{\text{release}} = T_{\text{attack}} - 5\text{ dB}$).
-  - Hangover timer (domyślnie 1.5 s).
-- **Wielowątkowość FreeRTOS**:
-  - Rdzeń 1: `AudioCaptureTask` (Priorytet 6), UI & Keyboard (Priorytet 1).
-  - Rdzeń 0: `Mp3WriterTask` (Priorytet 3) ze `StreamBuffer` 36 KB (trigger level 1152 B) oraz `AudioPlayerTask` (Priorytet 2).
+- Kod w 100% po angielsku; wszystkie teksty UI w `src/ui/Strings.h` (stopki Font0: max ~38 znaków, 240 px).
+- Include'y względem `src/` (`#include "audio/Recorder.h"`), przestrzeń nazw `voicerec`.
+- Wątek UI (Arduino `loop`, rdzeń 1) **nigdy nie czeka na audio**: tylko wysyła polecenia i odczytuje atomiki.
+
+## Platforma
+
+- PlatformIO, Arduino, `espressif32@6.9.0`, ESP32-S3, 8 MB, `default_8MB.csv`. `pio run` buduje i kopiuje obrazy do `release/`.
+- `ARDUINO_USB_MODE=1`, `ARDUINO_USB_CDC_ON_BOOT=1`, `serial_baudrate = 0`: UART0 nie może dotykać GPIO43 (zegar mikrofonu/głośnika).
+- `M5.config()`: `internal_mic = true`, `internal_spk = true` – M5Unified ustawia piny (i ES8311 na ADV).
+
+## Audio – wątki i własność sprzętu
+
+- `hw/AudioHardware`: mikrofon i głośnik dzielą GPIO43 (i 41 na ADV) – w danej chwili działa tylko jedno.
+  Każdą stronę włącza/wyłącza **wyłącznie zadanie, które jej używa**; `claim()` czeka max 600 ms na zwolnienie drugiej.
+- `audio/Recorder` – dwa zadania:
+  - `capture` (rdzeń 1, prio 5; zadanie mikrofonu M5Unified: prio 6, rdzeń 1, 12 buforów DMA) – jedyny użytkownik `M5.Mic`.
+    Trzy bufory po 576 próbek: dwa zawsze w kolejce sterownika, `record()` trzeciego wraca, gdy najstarszy jest pełny
+    (bez callbacków, bez utraty slotów). Ramka: DC blocker 80 Hz → wzmocnienie + limiter (`audio/Dsp`) → poziom →
+    `VoiceDetector` → pre-roll / kolejka zapisu.
+  - `mp3writer` (rdzeń 0, prio 3): kolejka 32 ramek PCM (1,15 s) → shine → bloki 4 KB na kartę; `Sync` po końcu
+    segmentu głosu i co 10 s, `Close` kończy plik i przełącza stan na `Idle`.
+  - `start()` (UI) otwiera plik i enkoder, `stop()` tylko ustawia żądanie; stany: `Idle → Starting → Recording → Saving → Idle`.
+  - Tryb `Monitor` (Mic check): mikrofon i detektor bez zapisu. Rozgrzewka: odrzucenie ~290 ms po starcie
+    i zerowych ramek ES8311 (do ~1 s).
+- `audio/Player` (rdzeń 0, prio 4): zadanie posiada plik, dekoder Helix i głośnik; UI wysyła polecenia przez kolejkę.
+  `M5.Speaker.playRaw` gra z pamięci wywołującego – PCM jest kopiowany do 3 rotujących buforów, nowy dopiero gdy w kolejce
+  głośnika są < 2. Długość i przewijanie z nagłówka MP3 (`audio/Mp3Info`, CBR).
+
+## Mikrofon i aktywacja głosem
+
+- Cardputer: PDM SPM1423, `magnification = 16` (×8). ADV: ES8311, M5Unified zostawia PGA na 0 dB – `AudioHardware::tuneAdvCodec()`
+  ustawia PGA +21 dB (reg 0x14 = 0x17, jak M5Stack StopWatch) po `Mic.begin()`; `magnification = 2` (×1).
+- Programowe wzmocnienie 0–30 dB (krok 3) z miękkim limiterem od -2,5 dBFS. Domyślnie +12 dB (Cardputer) / +18 dB (ADV).
+- `VoiceDetector`: próg = śledzony szum + max(margines czułości, 3 × odchylenie tła); margines 16/12/9/7/5 dB dla czułości 1–5.
+  Między głosami szum = średnia tła (wolno w górę, szybciej w dół); w trakcie głosu tylko w dół + powolne podciąganie do
+  minimum z 2 s (wentylator nie trzyma nagrania). Start: 2 ramki nad progiem; koniec: poniżej progu zwolnienia przez czas
+  podtrzymania. Pierwsza sekunda po resecie: szum = minimum + 2 odchylenia. Zachowanie sprawdzone symulacją scenariuszy
+  (cisza/mowa, zły start, wentylator, kliknięcia, 60 s mowy).
+- Kalibracja (`audio/Calibration`): 3 s ciszy (mediana + rozrzut P90) i 4,5 s mowy (P80 ramek >8 dB nad szumem) →
+  wzmocnienie tak, by mowa ≈ -20 dBFS, czułość z rozrzutu tła i SNR. Zmierzony szum (przeliczony na nowe wzmocnienie)
+  jest tylko wartością startową detektora.
+
+## Karta SD i ustawienia
+
+- SD na FSPI: SCK 40, MISO 39, MOSI 14, CS 12, 20 MHz. `SdStorage` serializuje wywołania (rekurencyjny mutex),
+  wolne miejsce liczone tylko po montażu / nagraniu / usunięciu (liczenie przechodzi FAT). Nowa karta wykrywana co 10 s,
+  nigdy w trakcie nagrywania/odtwarzania.
+- Nagrania: `/recordings/rec_NNNN.mp3`, numer nigdy nie nadpisuje istniejącego pliku; puste nagranie (0 ramek) jest usuwane.
+- Ustawienia w NVS (`Preferences`, przestrzeń `voicerec`), nie na karcie. Zmiany w trakcie nagrywania zapisywane po jego końcu.
+
+## UI
+
+- `App`: stos ekranów, pasek statusu (chip sekcji + stan karty + bateria), stopka, toasty, wygaszanie (30 s przyciemnienie,
+  wyłączenie wg ustawień; klawisz budzący jest połykany), LED (`hw/StatusLed` z LG Remote).
+- Ekrany: `HomeScreen` (karuzela), `RecordScreen`, `LibraryScreen` + `PlayerScreen`, `MicCheckScreen`,
+  ustawienia (`makeSettingsScreen` → `ListScreen`), `HelpScreen`, `ConfirmScreen` / `InfoScreen`.
+- Klawisze jak w LG Remote: `;` `.` `,` `/` strzałki, `esc` to klawisz `` ` ``, `del` = wstecz, `tab` = pomoc, `G0` = enter.

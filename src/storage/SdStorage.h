@@ -3,58 +3,71 @@
 #pragma once
 
 #include <Arduino.h>
-#include <SD.h>
+#include <FS.h>
 #include <SPI.h>
-#include <vector>
-#include <string>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+
+#include <vector>
 
 namespace voicerec {
 
 struct RecordingFile {
-    std::string name;
-    std::string path;
-    size_t sizeBytes = 0;
-    uint32_t estimatedDurationSec = 0;
+    String name;  // file name without the folder
+    String path;  // full path on the card
+    uint32_t sizeBytes = 0;
+    int number = 0;  // n of rec_nnnn.mp3, 0 for other MP3 files
 };
 
+// The SD card (SPI on GPIO 40/39/14/12, shared by Cardputer and Cardputer ADV).
+// Free space is cached: computing it walks the FAT and can take a second on large cards,
+// so it is refreshed only after mounting, recording and deleting. Calls are serialized
+// (UI and player task both open files); an open file is then used by one task only.
 class SdStorage {
 public:
-    static SdStorage& instance() {
-        static SdStorage inst;
-        return inst;
-    }
+    static SdStorage& instance();
 
-    bool begin();
-    bool isMounted() const { return mounted_; }
+    // Mounts the card if needed (retried at most every few seconds); detects removal.
     bool ensureMounted();
+    bool mounted() const { return mounted_; }
 
-    uint64_t totalBytes();
-    uint64_t usedBytes();
-    uint64_t freeBytes();
+    uint64_t totalBytes() const { return totalBytes_; }
+    uint64_t freeBytes() const { return freeBytes_; }
+    void refreshSpace();
 
+    // Recordings, newest (highest number) first.
     std::vector<RecordingFile> listRecordings();
-    std::string generateNextRecordingPath();
-    bool deleteRecording(const std::string& path);
+    size_t recordingCount();
+    String nextRecordingPath();
+    bool remove(const String& path);
 
-    File openFile(const char* path, const char* mode);
-    bool fileExists(const char* path);
-
-    void lock();
-    void unlock();
+    File openForWrite(const String& path);
+    File openForRead(const String& path);
 
     static constexpr const char* kRecordingsDir = "/recordings";
-    static constexpr const char* kConfigDir = "/config";
 
 private:
     SdStorage();
-    ~SdStorage();
 
-    SPIClass sdSpi_;
-    SemaphoreHandle_t mutex_ = nullptr;
+    bool mount();
+
+    class Guard {
+    public:
+        explicit Guard(SemaphoreHandle_t lock) : lock_(lock) { xSemaphoreTakeRecursive(lock_, portMAX_DELAY); }
+        ~Guard() { xSemaphoreGiveRecursive(lock_); }
+
+    private:
+        SemaphoreHandle_t lock_;
+    };
+
+    SemaphoreHandle_t lock_;
+    SPIClass spi_;
     bool mounted_ = false;
     uint32_t lastMountAttemptAt_ = 0;
+    uint64_t totalBytes_ = 0;
+    uint64_t freeBytes_ = 0;
+    int highestNumber_ = -1;  // -1 = not scanned since mounting
+    int cachedCount_ = -1;
 };
 
 }  // namespace voicerec

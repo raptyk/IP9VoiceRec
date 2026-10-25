@@ -1,112 +1,99 @@
-# CardputerVoiceRec 🎙️
+# CardputerVoiceRec
 
-**CardputerVoiceRec** to profesjonalny, autonomiczny dyktafon cyfrowy z kompresją audio w locie do formatu **MP3** oraz inteligentnym systemem aktywacji głosem (**VAS / VAD**) stworzony dla **M5Stack Cardputer** oraz **Cardputer ADV** (ESP32-S3).
-
-Zaprojektowany z myślą o rejestracji wielogodzinnych notatek głosowych, wykładów, spotkań oraz monitoringu audio bez marnowania miejsca na ciszę i szumy tła.
-
----
-
-## Główne Funkcje
-
-* **Kompresja MP3 w Czasie Rzeczywistym (`libshine`)**:
-  - Dźwięk kompresowany na bieżąco na procesorze ESP32-S3 do formatu MPEG-2 Layer 3 (16 kHz, Mono, 48 kbps).
-  - Zużycie miejsca: zaledwie **~6 kB na sekundę** mowy (karta SD 8 GB pomieści ponad **370 godzin nagrań**).
-  - Obciążenie procesora: ~15% jednego rdzenia 240 MHz (wyłącznie arytmetyka stałoprzecinkowa).
-  - Pliki `.mp3` odtwarzają się bezpośrednio na każdym komputerze, telefonie i w przeglądarce.
-
-* **Inteligentny System Aktywacji Głosem (VAS / VAD)**:
-  - **Zero utraty pierwszego słowa (Pre-Roll 360 ms)**: Bufor kołowy w pamięci RAM przechowuje ostatnie 360 ms dźwięku; w momencie wykrycia mowy historia jest natychmiast dopisywana przed pierwszym słowem.
-  - **Histereza detekcji**: Osobny próg załączenia (Attack, np. -36 dBFS) i podtrzymania (Release, np. -41 dBFS) eliminujący drgania na granicy ciszy.
-  - **Hangover Timer (1.5 s)**: Naturalne pauzy na oddech między zdaniami nie przerywają nagrania.
-  - **Brak trzasków**: Spójność ramek MP3 (576 próbek) z łagodnym wznawianiem filtrów polifazowych.
-
-* **Statystyczna Kalibracja Szumów Otoczenia (Ambient Noise Profiler)**:
-  - 2.5-sekundowy test akustyczny pomieszczenia wyliczający percentyle $P_{40}$ (stabilne tło) i $P_{85}$ (piki szumów).
-  - Niewrażliwy na przypadkowe stuknięcia w obudowę Cardputera.
-  - Automatycznie dobiera optymalną czułość dla cichego pokoju, biura lub hałaśliwej ulicy.
-
-* **Wbudowany Odtwarzacz z Dekoderem `Helix MP3`**:
-  - Odsłuch nagrań bezpośrednio z karty SD przez wbudowany głośnik Cardputera.
-  - Pasek postępu, pauza, regulacja głośności i usuwanie plików.
-
-* **Rygorystyczna Architektura Sprzętowa (Half-Duplex)**:
-  - Separacja peryferiów: mikrofon (`I2S_NUM_0`) i głośnik (`I2S_NUM_1`) dzielące GPIO 43 i 41 nigdy nie pracują równolegle, co zapobiega zwarciom wyjść zegarowych.
-  - Dedykowana magistrala karty SD na kontrolerze `SPI2_HOST` (FSPI) odseparowana od wyświetlacza (`SPI3_HOST`).
-  - Dedykowana kolejka FreeRTOS `StreamBuffer` (36 KB) eliminująca dropy audio przy opóźnieniach zapisu Flash na karcie SD.
-
-* **Ergonomiczny Interfejs Retro/Cyberpunk**:
-  - Płynny, dynamiczny wskaźnik **VU Meter** w dBFS z peak hold oraz pionowym znacznikiem progu detekcji.
-  - Ekrany: *Menu Główne*, *Ekran Nagrywania*, *Biblioteka i Odtwarzacz*, *Kalibrator Szumów*, *Ustawienia*.
+Dyktafon cyfrowy dla **M5Stack Cardputer** i **Cardputer ADV** (ESP32-S3): nagrywa do plików **MP3** na kartę SD,
+z **aktywacją głosem**, która pomija ciszę, kalibracją mikrofonu i wbudowanym odtwarzaczem.
+Interfejs w stylu [LG Remote](../CardputerLGRemote): karuzela kart na starcie, kolorowe ekrany sekcji, rysowane klawisze,
+podpowiedzi w stopce i opis każdej opcji.
 
 ---
 
-## Sterowanie Klawiaturą
+## Funkcje
 
-### Menu Główne
+* **MP3 w locie** (`libshine`): 16 kHz, mono, 32 / 48 / 64 kbit/s. Przy 48 kbit/s ok. 21 MB na godzinę mowy.
+  Pliki `rec_0001.mp3`, `rec_0002.mp3`… w katalogu `/recordings` – otwierają się na każdym komputerze i telefonie.
+* **Aktywacja głosem, która dopasowuje się do pomieszczenia**:
+  - próg nie jest stałą wartością w dBFS, tylko marginesem nad **na bieżąco śledzonym poziomem szumu**
+    (średnia tła i jego zmienność); ta sama czułość działa w cichej sypialni i w biurze,
+  - start po dwóch głośnych ramkach z rzędu (72 ms) – kliknięcia klawiszy i stuknięcia nie uruchamiają nagrania,
+  - **pre-roll 360 ms** – pierwsza sylaba nie jest ucinana,
+  - **podtrzymanie** (domyślnie 1,5 s) – krótkie pauzy między słowami nie dzielą nagrania,
+  - włączony nagle wentylator podtrzymuje nagranie najwyżej kilka sekund, potem detektor uznaje go za tło.
+* **Mic check i kalibracja** (2 kroki, ok. 8 s): 3 s ciszy (szum tła i jego zmienność), potem 4,5 s mowy
+  (poziom głosu). Kalibracja ustawia **wzmocnienie** tak, by mowa trafiała w ok. -20 dBFS, i dobiera **czułość**
+  do odstępu głosu od szumu. Na żywo: miernik z zaznaczonym poziomem szumu i progiem wyzwalania.
+* **Wzmocnienie mikrofonu**: Cardputer – mikrofon PDM ×8 + programowe 0…30 dB; Cardputer ADV – kodek ES8311
+  z analogowym PGA +21 dB (M5Unified zostawia go na 0 dB, stąd wcześniejszy zbyt cichy mikrofon) + programowe
+  0…30 dB. Głośne fragmenty są łagodnie limitowane zamiast twardo obcinane.
+* **Odtwarzacz** (Helix MP3): pauza, przewijanie ±10 s, poprzedni/następny plik, głośność, usuwanie.
+* **Wskaźnik LED**: ciągły czerwony = nagrywany głos, pulsujący czerwony = nasłuch, bursztynowy = pauza,
+  pulsujący biały = zapisywanie, dwa zielone mignięcia = zapisano, dwa czerwone = błąd.
+* **Ekran gaśnie podczas nagrywania** (ustawialne), nagrywanie trwa dalej; klawisz budzący ekran nie jest
+  przekazywany dalej, więc nie zatrzyma przypadkiem nagrania.
+
+---
+
+## Sterowanie
+
+### Ekran startowy
+
 | Klawisz | Akcja |
 | :--- | :--- |
-| **`[;]` / `[,]` / `[Strzałka w górę]`** | Przejście do poprzedniej pozycji |
-| **`[.]` / `[/]` / `[Strzałka w dół]`** | Przejście do następnej pozycji |
-| **`[Enter]` / `[Spacja]`** | Wybór podświetlonej opcji |
-| **`[1]` .. `[4]`** | Bezpośredni skrót do ekranu (1: Rec, 2: Play, 3: Calib, 4: Set) |
-| **`[R]`** | Szybki start nagrywania |
-| **`[C]`** | Szybka kalibracja szumów |
+| `,` `/` (oraz `;` `.`) | Wybór karty: Record, Recordings, Mic check, Settings, Help |
+| `enter` / `G0` | Otwarcie karty (Record od razu zaczyna nagrywać) |
+| `r` | Nagrywanie od razu (także z listy nagrań) |
+| `1`–`5` | Otwarcie karty o danym numerze |
+| `tab` | Pomoc |
 
-### Ekran Nagrywania (Dyktafon)
+### Nagrywanie
+
 | Klawisz | Akcja |
 | :--- | :--- |
-| **`[Enter]` / `[Spacja]` / `[Esc]` / `[G0]`** | Zakończ i zapisz nagranie na karcie SD |
-| **`[P]`** | Wstrzymaj (Pause) / Wznów (Resume) nagrywanie |
-| **`[+]` / `[=]`** | Zwiększ czułość mowy (obniż próg o 1 dB) |
-| **`[-]` / `[_]`** | Zmniejsz czułość mowy (podnieś próg o 1 dB) |
-| **`[C]`** | Wejdź do kreatora kalibracji szumu |
+| `enter` / `G0` / `esc` / `del` | Zatrzymanie i zapis |
+| `space` | Pauza / wznowienie |
+| `v` | Aktywacja głosem wł./wył. (na żywo) |
+| `[` `]` | Czułość 1–5 |
+| `-` `=` | Wzmocnienie mikrofonu (krok 3 dB) |
 
-### Biblioteka i Odtwarzacz
+### Nagrania i odtwarzacz
+
 | Klawisz | Akcja |
 | :--- | :--- |
-| **`[;]` / `[.]`** | Wybór pliku z listy |
-| **`[Enter]` / `[Spacja]` / `[P]`** | Odtwórz / Pauza |
-| **`[D]` / `[Backspace]`** | Usuń zaznaczony plik (wymaga potwierdzenia `[Y]`) |
-| **`[+]` / `[-]`** | Regulacja głośności głośnika |
-| **`[Esc]` / `[Opt]`** | Zatrzymanie odtwarzania i powrót do Menu |
+| `;` `.` | Poprzedni / następny plik |
+| `enter` / `space` | Odtwarzanie / pauza |
+| `,` `/` | Przewijanie -10 s / +10 s |
+| `-` `=` | Głośność |
+| `d` | Usunięcie pliku (z potwierdzeniem) |
+| `esc` / `del` | Powrót |
+
+### Mic check
+
+| Klawisz | Akcja |
+| :--- | :--- |
+| `enter` / `c` | Kalibracja (cisza, potem mowa) |
+| `[` `]` / `-` `=` | Czułość / wzmocnienie |
+| `v` | Aktywacja głosem wł./wył. |
 
 ---
 
-## Wskaźnik Diodowy LED RGB
+## Gotowe pliki (`release/`)
 
-Cardputer posiada wielokolorową diodę informującą o stanie systemu:
-* **Czerwony (Pulsowanie)**: Trwa nagrywanie mowy (VAS wykrył głos).
-* **Błękitny / Niebieski (Ciągły)**: VAS oczekuje na głos (cisza – oszczędzanie miejsca).
-* **Żółty / Bursztynowy**: Okres podtrzymania mowy (Hangover hold).
-* **Zielony**: Odtwarzanie pliku przez głośnik.
-* **Zgaszona**: Bezczynność / menu.
+Kompilacja tworzy w `release/`:
 
----
+1. `VoiceRecCardputer-<wersja>.bin` – sama aplikacja, do uruchomienia z karty SD przez **M5Launcher**,
+2. `VoiceRecCardputer-<wersja>-full.bin` – pełny obraz (bootloader + partycje + aplikacja) pod adres `0x0`.
 
-## Gotowe Pliki Binarne (Katalog `release/`)
-
-Po kompilacji w katalogu `release/` generowane są dwa formaty:
-1. **`VoiceRecCardputer-1.0.0.bin`**: Obraz samej aplikacji do skopiowania na kartę SD (`SD:/VoiceRecCardputer-1.0.0.bin`). Uruchamiany jednym kliknięciem przez **M5Launcher**.
-2. **`VoiceRecCardputer-1.0.0-full.bin`**: Pełny obraz scalony (bootloader + tablica partycji + boot_app0 + aplikacja) do wgrania przez **esptool** lub **M5Burner** pod adres `0x0`.
-
-### Wgrywanie przez `esptool`:
 ```bash
-esptool.py --chip esp32s3 write_flash 0x0 release/VoiceRecCardputer-1.0.0-full.bin
+esptool.py --chip esp32s3 write_flash 0x0 release/VoiceRecCardputer-1.1.0-full.bin
 ```
 
----
-
-## Kompilacja ze Źródeł
-
-Wymagany jest zainstalowany [PlatformIO](https://platformio.org/):
+## Kompilacja
 
 ```bash
-cd C:\Projekty\ip9.pl\CardputerVoiceRec
 pio run
 ```
 
 ---
 
 ## Licencja
-Projekt objęty licencją MIT.
-Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>.
+
+MIT. Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>.

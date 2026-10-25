@@ -2,33 +2,29 @@
 // Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>
 #pragma once
 
-#include <stdint.h>
 #include <stddef.h>
-#include <functional>
-#include "AudioConfig.h"
+#include <stdint.h>
+
+#include "audio/AudioConfig.h"
 
 namespace voicerec {
 
+// Ring of the last kPreRollFrames frames of "silence". When voice starts, the frames are
+// written in front of it so the first syllable (which starts below the threshold) is kept.
 class PreRollBuffer {
 public:
-    PreRollBuffer();
+    void reset() { count_ = 0; head_ = 0; }
 
-    void reset();
+    void push(const int16_t* frame);
 
-    /// Push a 576-sample frame into the ring buffer
-    void pushFrame(const int16_t* samples);
-
-    /// Flush all available frames (oldest to newest) to a consumer callback
-    /// Returns the number of frames flushed
-    size_t flush(const std::function<void(const int16_t* samples, size_t count)>& consumer);
-
-    size_t availableFrames() const { return count_; }
-    bool isFull() const { return count_ == kPreRollFrameCount; }
+    size_t count() const { return count_; }
+    // i = 0 is the oldest stored frame.
+    const int16_t* frame(size_t i) const;
 
 private:
-    int16_t buffer_[kPreRollFrameCount][kSamplesPerFrame];
-    size_t head_ = 0;   // Next write index
-    size_t count_ = 0;  // Stored frames count (up to kPreRollFrameCount)
+    int16_t frames_[kPreRollFrames][kSamplesPerFrame] = {};
+    size_t head_ = 0;   // next write slot
+    size_t count_ = 0;  // stored frames (up to kPreRollFrames)
 };
 
 }  // namespace voicerec

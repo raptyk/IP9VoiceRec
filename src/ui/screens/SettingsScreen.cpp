@@ -1,176 +1,153 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>
 #include "SettingsScreen.h"
-#include <esp_log.h>
+
+#include <M5Cardputer.h>
+
 #include <algorithm>
-#include "../../app/App.h"
-#include "../../hw/Device.h"
-#include "../../hw/StatusLed.h"
-#include "../../storage/SdStorage.h"
-#include "../../audio/AudioPlayer.h"
-#include "../../ui/Painter.h"
+
+#include "app/App.h"
+#include "storage/SdStorage.h"
+#include "ui/Painter.h"
+#include "ui/Strings.h"
+#include "ui/screens/MessageScreens.h"
+#include "ui/screens/MicCheckScreen.h"
 
 namespace voicerec {
 
-SettingsScreen::SettingsScreen(App& app)
-    : Screen(app) {}
+namespace {
 
-void SettingsScreen::adjustValue(int delta) {
-    auto& s = app_.settings();
+constexpr uint16_t kScreenOffChoices[] = {30, 60, 120, 300, 0};
+constexpr int kBrightnessStep = 25;
+constexpr int kBrightnessMin = 30;
 
-    switch (selectedIndex_) {
-        case SettingId::VasEnabled:
-            s.vasEnabled = !s.vasEnabled;
-            break;
-
-        case SettingId::AttackThreshold:
-            s.vasAttackThresholdDbfs = std::max(-55.0f, std::min(-20.0f, s.vasAttackThresholdDbfs + delta));
-            break;
-
-        case SettingId::HysteresisMargin:
-            s.vasHysteresisMarginDb = std::max(2.0f, std::min(10.0f, s.vasHysteresisMarginDb + delta));
-            break;
-
-        case SettingId::Hangover: {
-            int h = static_cast<int>(s.vasHangoverMs) + delta * 250;
-            s.vasHangoverMs = std::max(500, std::min(3500, h));
-            break;
+template <typename T, size_t N>
+T cycle(const T (&choices)[N], T current, int delta) {
+    size_t index = 0;
+    for (size_t i = 0; i < N; ++i) {
+        if (choices[i] == current) {
+            index = i;
         }
-
-        case SettingId::Bitrate:
-            if (s.bitrateKbps == 32) s.bitrateKbps = (delta > 0) ? 48 : 32;
-            else if (s.bitrateKbps == 48) s.bitrateKbps = (delta > 0) ? 64 : 32;
-            else if (s.bitrateKbps == 64) s.bitrateKbps = (delta > 0) ? 64 : 48;
-            break;
-
-        case SettingId::Brightness: {
-            int b = static_cast<int>(s.screenBrightness) + delta * 25;
-            s.screenBrightness = std::max(50, std::min(255, b));
-            Device::instance().setBrightness(s.screenBrightness);
-            break;
-        }
-
-        case SettingId::StatusLed:
-            s.statusLedEnabled = !s.statusLedEnabled;
-            StatusLed::instance().setEnabled(s.statusLedEnabled);
-            break;
-
-        case SettingId::Volume: {
-            int v = static_cast<int>(s.speakerVolume) + delta * 15;
-            s.speakerVolume = std::max(50, std::min(255, v));
-            AudioPlayer::instance().setVolume(s.speakerVolume);
-            break;
-        }
-
-        default:
-            break;
     }
+    return choices[(index + N + (delta > 0 ? 1 : N - 1)) % N];
 }
 
-void SettingsScreen::draw(M5Canvas& canvas) {
-    canvas.fillScreen(theme::kBg);
+String onOff(bool value) {
+    return value ? str::kOn : str::kOff;
+}
 
-    const int bat = Device::instance().batteryLevel();
-    const bool chg = Device::instance().isCharging();
-    const bool sdOk = SdStorage::instance().isMounted();
-    Painter::drawHeader(canvas, "Settings", bat, chg, sdOk);
+String screenOffText(uint16_t seconds) {
+    if (seconds == 0) {
+        return str::kNever;
+    }
+    return seconds < 60 ? String(seconds) + " s" : String(seconds / 60) + " min";
+}
 
-    auto& s = app_.settings();
+}  // namespace
 
-    struct SettingDisplay {
-        const char* label;
-        char value[32];
+std::unique_ptr<ListScreen> makeSettingsScreen(App& app) {
+    Settings& s = app.settings();
+    // Every change is applied and stored at once.
+    auto changed = [&app]() {
+        app.applySettings();
+        app.saveSettings();
     };
 
-    SettingDisplay list[SettingId::Count];
-    snprintf(list[SettingId::VasEnabled].value, 32, "%s", s.vasEnabled ? "ON" : "OFF");
-    list[SettingId::VasEnabled].label = "VAS System:";
+    std::vector<ListItem> items;
+    items.push_back({str::kSetVoiceActivation, [&s]() { return onOff(s.voiceActivation); }, nullptr,
+                     [&s, changed](int) {
+                         s.voiceActivation = !s.voiceActivation;
+                         changed();
+                     },
+                     str::kSetVoiceActivationText});
+    items.push_back({str::kSetSensitivity,
+                     [&s]() {
+                         return String(s.sensitivity) + " - " + str::kSensitivityNames[s.sensitivity - kSensitivityMin];
+                     },
+                     nullptr,
+                     [&s, changed](int delta) {
+                         s.sensitivity = constrain(s.sensitivity + delta, kSensitivityMin, kSensitivityMax);
+                         changed();
+                     },
+                     str::kSetSensitivityText});
+    items.push_back({str::kSetHold, [&s]() { return String(s.holdMs / 1000.0f, 1) + " s"; }, nullptr,
+                     [&s, changed](int delta) {
+                         s.holdMs = constrain(s.holdMs + delta * kHangoverStepMs, kHangoverMinMs, kHangoverMaxMs);
+                         changed();
+                     },
+                     str::kSetHoldText});
+    items.push_back({str::kSetGain, [&s]() { return String("+") + s.micGainDb + " dB"; }, nullptr,
+                     [&s, changed](int delta) {
+                         s.micGainDb = constrain(s.micGainDb + delta * kMicGainStepDb, kMicGainMinDb, kMicGainMaxDb);
+                         changed();
+                     },
+                     str::kSetGainText});
+    items.push_back({str::kSetQuality, [&s]() { return String(s.bitrateKbps) + " kbit/s"; }, nullptr,
+                     [&s, changed](int delta) {
+                         s.bitrateKbps = cycle(kBitrates, s.bitrateKbps, delta);
+                         changed();
+                     },
+                     str::kSetQualityText});
+    items.push_back({str::kSetVolume, [&s]() { return String(s.volume) + " / 10"; }, nullptr,
+                     [&s, changed](int delta) {
+                         s.volume = constrain(s.volume + delta, 0, 10);
+                         changed();
+                     },
+                     str::kSetVolumeText});
+    items.push_back({str::kSetBrightness,
+                     [&s, &app]() {
+                         return app.device().brightnessLocked() ? String("Max (LED)")
+                                                                : String(s.brightness * 100 / 255) + "%";
+                     },
+                     nullptr,
+                     [&s, changed](int delta) {
+                         s.brightness = constrain(s.brightness + delta * kBrightnessStep, kBrightnessMin, 255);
+                         changed();
+                     },
+                     str::kSetBrightnessText});
+    items.push_back({str::kSetScreenOff, [&s]() { return screenOffText(s.screenOffSec); }, nullptr,
+                     [&s, changed](int delta) {
+                         s.screenOffSec = cycle(kScreenOffChoices, s.screenOffSec, delta);
+                         changed();
+                     },
+                     str::kSetScreenOffText});
+    items.push_back({str::kSetStatusLed, [&s]() { return onOff(s.statusLed); }, nullptr,
+                     [&s, changed](int) {
+                         s.statusLed = !s.statusLed;
+                         changed();
+                     },
+                     str::kSetStatusLedText});
+    items.push_back({str::kSetMicCheck, nullptr, [&app]() { app.push(std::make_unique<MicCheckScreen>(app)); },
+                     nullptr, str::kSetMicCheckText});
+    items.push_back({str::kSetStorage,
+                     []() {
+                         SdStorage& storage = SdStorage::instance();
+                         return storage.mounted() ? painter::formatBytes(storage.freeBytes()) : String(str::kOff);
+                     },
+                     [&app]() {
+                         SdStorage& storage = SdStorage::instance();
+                         if (!storage.ensureMounted()) {
+                             app.warn(str::kInsertCard);
+                             return;
+                         }
+                         char body[48];
+                         snprintf(body, sizeof(body), str::kStorageInfo, painter::formatBytes(storage.freeBytes()).c_str(),
+                                  painter::formatBytes(storage.totalBytes()).c_str());
+                         app.push(std::make_unique<InfoScreen>(app, str::kSetStorage, body, str::kSetStorageText));
+                     },
+                     nullptr, str::kSetStorageText});
+    items.push_back({str::kSetAbout, nullptr,
+                     [&app]() {
+                         char title[40];
+                         snprintf(title, sizeof(title), str::kAboutTitle, APP_VERSION);
+                         char body[64];
+                         snprintf(body, sizeof(body), str::kAboutBody, app.device().modelName(),
+                                  static_cast<unsigned>(ESP.getFreeHeap() / 1024));
+                         app.push(std::make_unique<InfoScreen>(app, title, body, str::kAboutDetail));
+                     },
+                     nullptr, str::kSetAboutText});
 
-    snprintf(list[SettingId::AttackThreshold].value, 32, "%.0f dBFS", s.vasAttackThresholdDbfs);
-    list[SettingId::AttackThreshold].label = "Sensitivity:";
-
-    snprintf(list[SettingId::HysteresisMargin].value, 32, "%.0f dB", s.vasHysteresisMarginDb);
-    list[SettingId::HysteresisMargin].label = "Hysteresis:";
-
-    snprintf(list[SettingId::Hangover].value, 32, "%.1f s", s.vasHangoverMs / 1000.0f);
-    list[SettingId::Hangover].label = "Hangover:";
-
-    snprintf(list[SettingId::Bitrate].value, 32, "%d kbps", s.bitrateKbps);
-    list[SettingId::Bitrate].label = "MP3 Bitrate:";
-
-    snprintf(list[SettingId::Brightness].value, 32, "%d", s.screenBrightness);
-    list[SettingId::Brightness].label = "Brightness:";
-
-    snprintf(list[SettingId::StatusLed].value, 32, "%s", s.statusLedEnabled ? "ON" : "OFF");
-    list[SettingId::StatusLed].label = "Status LED:";
-
-    snprintf(list[SettingId::Volume].value, 32, "%d%%", (s.speakerVolume * 100) / 255);
-    list[SettingId::Volume].label = "Volume:";
-
-    // Scrollable list: 4 items visible
-    constexpr int kVisible = 4;
-    constexpr int kItemH = 18;
-    constexpr int kItemW = theme::kScreenWidth - 12;
-
-    int offset = 0;
-    if (selectedIndex_ >= kVisible) {
-        offset = selectedIndex_ - kVisible + 1;
-    }
-
-    int y = 22;
-    for (int i = 0; i < kVisible; ++i) {
-        const int idx = offset + i;
-        if (idx >= SettingId::Count) break;
-
-        const bool selected = (idx == selectedIndex_);
-        const uint16_t bg = selected ? theme::kSelection : theme::kPanelBg;
-        const uint16_t border = selected ? theme::kPrimary : theme::kPanelBorder;
-
-        Painter::drawCard(canvas, 6, y, kItemW, kItemH, bg, border);
-
-        canvas.setTextSize(1);
-        canvas.setTextColor(selected ? theme::kText : theme::kTextDim, bg);
-        canvas.drawString(list[idx].label, 12, y + 5);
-
-        // Value on right with arrow hints
-        char valWithArrows[48];
-        if (selected) {
-            snprintf(valWithArrows, sizeof(valWithArrows), "< %s >", list[idx].value);
-            canvas.setTextColor(theme::kPrimary, bg);
-        } else {
-            snprintf(valWithArrows, sizeof(valWithArrows), "%s", list[idx].value);
-            canvas.setTextColor(theme::kTextDim, bg);
-        }
-
-        const int valW = canvas.textWidth(valWithArrows);
-        canvas.drawString(valWithArrows, theme::kScreenWidth - 14 - valW, y + 5);
-
-        y += kItemH + 2;
-    }
-
-    Painter::drawFooter(canvas, "[UP/DN] Select  [<- / ->] Edit  [S] Save  [ESC]");
-}
-
-void SettingsScreen::onKey(const KeyEvent& event) {
-    if (event.code == ';' || event.code == ',' || event.code == 0x1E) { // Up
-        if (selectedIndex_ > 0) {
-            --selectedIndex_;
-        }
-    } else if (event.code == '.' || event.code == '/' || event.code == 0x1F) { // Down
-        if (selectedIndex_ + 1 < SettingId::Count) {
-            ++selectedIndex_;
-        }
-    } else if (event.code == '[' || event.code == '-' || event.code == '<') { // Left / Decrement
-        adjustValue(-1);
-    } else if (event.code == ']' || event.code == '=' || event.code == '+' || event.code == '>') { // Right / Increment
-        adjustValue(1);
-    } else if (event.code == 's' || event.code == 'S' || event.code == keycode::kEnter) {
-        app_.settings().save();
-        app_.toast("Settings Saved");
-        app_.pop();
-    } else if (event.code == keycode::kOpt || event.code == 0x1B) {
-        app_.pop();
-    }
+    return std::make_unique<ListScreen>(app, str::kSettingsTitle, std::move(items));
 }
 
 }  // namespace voicerec

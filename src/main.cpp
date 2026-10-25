@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>
 //
-// CardputerVoiceRec - Smart Voice Recorder with MP3 compression and VAS
-// for M5Stack Cardputer & Cardputer ADV (ESP32-S3)
+// CardputerVoiceRec - voice recorder with MP3 compression and voice activation
+// for M5Stack Cardputer and Cardputer ADV (ESP32-S3).
 
 #include <Arduino.h>
+
 #include "app/App.h"
 
 namespace {

@@ -1,236 +1,184 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>
 #include "SdStorage.h"
-#include <esp_log.h>
+
+#include <SD.h>
+
 #include <algorithm>
 
 namespace voicerec {
-
-[[maybe_unused]] static const char* TAG = "SdStorage";
 
 namespace {
 constexpr int8_t kSdSck = 40;
 constexpr int8_t kSdMiso = 39;
 constexpr int8_t kSdMosi = 14;
 constexpr int8_t kSdCs = 12;
-constexpr uint32_t kSdFrequency = 20000000; // 20 MHz
-constexpr uint32_t kMountRetryIntervalMs = 5000;
+constexpr uint32_t kSdFrequency = 20000000;
+// Without a card SD.begin() takes a moment; do not retry on every call.
+constexpr uint32_t kMountRetryMs = 4000;
+
+// "rec_0007.mp3" -> 7; other names -> 0.
+int recordingNumber(const String& name) {
+    String lower = name;
+    lower.toLowerCase();
+    if (!lower.startsWith("rec_") || !lower.endsWith(".mp3")) {
+        return 0;
+    }
+    return lower.substring(4, lower.length() - 4).toInt();
+}
+
+bool isMp3(const String& name) {
+    String lower = name;
+    lower.toLowerCase();
+    return lower.endsWith(".mp3") && !lower.startsWith(".");
+}
 }  // namespace
 
-SdStorage::SdStorage()
-    : sdSpi_(FSPI) {
-    mutex_ = xSemaphoreCreateMutex();
+SdStorage& SdStorage::instance() {
+    static SdStorage storage;
+    return storage;
 }
 
-SdStorage::~SdStorage() {
-    if (mutex_) {
-        vSemaphoreDelete(mutex_);
-        mutex_ = nullptr;
-    }
-}
+SdStorage::SdStorage() : lock_(xSemaphoreCreateRecursiveMutex()), spi_(FSPI) {}
 
-void SdStorage::lock() {
-    if (mutex_) {
-        xSemaphoreTake(mutex_, portMAX_DELAY);
-    }
-}
-
-void SdStorage::unlock() {
-    if (mutex_) {
-        xSemaphoreGive(mutex_);
-    }
-}
-
-bool SdStorage::begin() {
-    lock();
-    if (mounted_) {
-        unlock();
-        return true;
-    }
-
+bool SdStorage::mount() {
     lastMountAttemptAt_ = millis();
-    sdSpi_.begin(kSdSck, kSdMiso, kSdMosi, kSdCs);
-
-    mounted_ = SD.begin(kSdCs, sdSpi_, kSdFrequency);
+    spi_.begin(kSdSck, kSdMiso, kSdMosi, kSdCs);
+    mounted_ = SD.begin(kSdCs, spi_, kSdFrequency);
     if (!mounted_) {
-        ESP_LOGW(TAG, "SD mount failed on CS %d", kSdCs);
         SD.end();
-        unlock();
         return false;
     }
-
-    ESP_LOGI(TAG, "SD mounted successfully. Type: %d, Size: %llu MB",
-             SD.cardType(), SD.cardSize() / (1024 * 1024));
-
     if (!SD.exists(kRecordingsDir)) {
         SD.mkdir(kRecordingsDir);
     }
-    if (!SD.exists(kConfigDir)) {
-        SD.mkdir(kConfigDir);
-    }
-
-    unlock();
+    highestNumber_ = -1;
+    cachedCount_ = -1;
+    refreshSpace();
+    log_i("SD card mounted: %llu MB, %llu MB free", totalBytes_ >> 20, freeBytes_ >> 20);
     return true;
 }
 
 bool SdStorage::ensureMounted() {
-    lock();
-    if (mounted_) {
-        if (SD.cardType() == CARD_NONE) {
-            ESP_LOGW(TAG, "SD card removed");
-            SD.end();
-            mounted_ = false;
-        } else {
-            unlock();
-            return true;
-        }
+    Guard guard(lock_);
+    if (mounted_ && SD.cardType() == CARD_NONE) {
+        log_w("SD card removed");
+        SD.end();
+        mounted_ = false;
+        totalBytes_ = 0;
+        freeBytes_ = 0;
     }
-
-    const uint32_t now = millis();
-    if (lastMountAttemptAt_ != 0 && now - lastMountAttemptAt_ < kMountRetryIntervalMs) {
-        unlock();
+    if (mounted_) {
+        return true;
+    }
+    if (lastMountAttemptAt_ != 0 && millis() - lastMountAttemptAt_ < kMountRetryMs) {
         return false;
     }
-    unlock();
-
-    return begin();
+    return mount();
 }
 
-uint64_t SdStorage::totalBytes() {
-    lock();
+void SdStorage::refreshSpace() {
+    Guard guard(lock_);
     if (!mounted_) {
-        unlock();
-        return 0;
+        return;
     }
-    uint64_t total = SD.totalBytes();
-    unlock();
-    return total;
-}
-
-uint64_t SdStorage::usedBytes() {
-    lock();
-    if (!mounted_) {
-        unlock();
-        return 0;
-    }
-    uint64_t used = SD.usedBytes();
-    unlock();
-    return used;
-}
-
-uint64_t SdStorage::freeBytes() {
-    lock();
-    if (!mounted_) {
-        unlock();
-        return 0;
-    }
-    const uint64_t total = SD.totalBytes();
+    totalBytes_ = SD.totalBytes();
     const uint64_t used = SD.usedBytes();
-    unlock();
-    return total > used ? (total - used) : 0;
+    freeBytes_ = totalBytes_ > used ? totalBytes_ - used : 0;
 }
 
 std::vector<RecordingFile> SdStorage::listRecordings() {
+    Guard guard(lock_);
     std::vector<RecordingFile> list;
     if (!ensureMounted()) {
         return list;
     }
-
-    lock();
     File dir = SD.open(kRecordingsDir);
     if (!dir || !dir.isDirectory()) {
-        unlock();
         return list;
     }
-
-    File entry = dir.openNextFile();
-    while (entry) {
-        if (!entry.isDirectory()) {
-            std::string name = entry.name();
-            // Match .mp3 extension
-            if (name.length() > 4) {
-                std::string ext = name.substr(name.length() - 4);
-                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                if (ext == ".mp3") {
-                    RecordingFile rec;
-                    rec.name = name;
-                    rec.path = std::string(kRecordingsDir) + "/" + name;
-                    rec.sizeBytes = entry.size();
-                    rec.estimatedDurationSec = static_cast<uint32_t>(rec.sizeBytes / 6000);
-                    list.push_back(rec);
-                }
-            }
+    for (File entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
+        if (entry.isDirectory()) {
+            continue;
         }
-        entry = dir.openNextFile();
+        RecordingFile file;
+        file.name = entry.name();
+        const int slash = file.name.lastIndexOf('/');
+        if (slash >= 0) {
+            file.name = file.name.substring(slash + 1);
+        }
+        if (!isMp3(file.name)) {
+            continue;
+        }
+        file.path = String(kRecordingsDir) + "/" + file.name;
+        file.sizeBytes = entry.size();
+        file.number = recordingNumber(file.name);
+        list.push_back(file);
     }
     dir.close();
-    unlock();
 
     std::sort(list.begin(), list.end(), [](const RecordingFile& a, const RecordingFile& b) {
-        return a.name > b.name;
+        return a.number != b.number ? a.number > b.number : a.name > b.name;
     });
-
+    highestNumber_ = list.empty() ? 0 : std::max(0, list.front().number);
+    cachedCount_ = static_cast<int>(list.size());
     return list;
 }
 
-std::string SdStorage::generateNextRecordingPath() {
-    if (!ensureMounted()) {
-        return std::string(kRecordingsDir) + "/rec_0001.mp3";
+size_t SdStorage::recordingCount() {
+    Guard guard(lock_);
+    if (cachedCount_ < 0) {
+        listRecordings();
     }
-
-    int highestIndex = 0;
-    lock();
-    File dir = SD.open(kRecordingsDir);
-    if (dir && dir.isDirectory()) {
-        File entry = dir.openNextFile();
-        while (entry) {
-            std::string name = entry.name();
-            int idx = 0;
-            if (sscanf(name.c_str(), "rec_%04d.mp3", &idx) == 1 ||
-                sscanf(name.c_str(), "REC_%04d.MP3", &idx) == 1) {
-                if (idx > highestIndex) {
-                    highestIndex = idx;
-                }
-            }
-            entry = dir.openNextFile();
-        }
-        dir.close();
-    }
-    unlock();
-
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%s/rec_%04d.mp3", kRecordingsDir, highestIndex + 1);
-    return std::string(buf);
+    return mounted_ ? static_cast<size_t>(std::max(0, cachedCount_)) : 0;
 }
 
-bool SdStorage::deleteRecording(const std::string& path) {
+String SdStorage::nextRecordingPath() {
+    Guard guard(lock_);
+    if (highestNumber_ < 0) {
+        listRecordings();
+    }
+    // Never overwrite: skip numbers that exist (e.g. a file copied onto the card meanwhile).
+    for (int number = std::max(0, highestNumber_) + 1;; ++number) {
+        char path[48];
+        snprintf(path, sizeof(path), "%s/rec_%04d.mp3", kRecordingsDir, number);
+        if (!SD.exists(path)) {
+            highestNumber_ = number;
+            if (cachedCount_ >= 0) {
+                ++cachedCount_;
+            }
+            return path;
+        }
+    }
+}
+
+bool SdStorage::remove(const String& path) {
+    Guard guard(lock_);
     if (!ensureMounted()) {
         return false;
     }
-    lock();
-    bool res = SD.remove(path.c_str());
-    unlock();
-    return res;
+    const bool removed = SD.remove(path);
+    if (removed) {
+        cachedCount_ = -1;
+        refreshSpace();
+    }
+    return removed;
 }
 
-File SdStorage::openFile(const char* path, const char* mode) {
+File SdStorage::openForWrite(const String& path) {
+    Guard guard(lock_);
     if (!ensureMounted()) {
         return File();
     }
-    lock();
-    File f = SD.open(path, mode);
-    unlock();
-    return f;
+    return SD.open(path, FILE_WRITE);
 }
 
-bool SdStorage::fileExists(const char* path) {
+File SdStorage::openForRead(const String& path) {
+    Guard guard(lock_);
     if (!ensureMounted()) {
-        return false;
+        return File();
     }
-    lock();
-    bool exists = SD.exists(path);
-    unlock();
-    return exists;
+    return SD.open(path, FILE_READ);
 }
 
 }  // namespace voicerec

@@ -2,35 +2,13 @@
 // Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>
 #pragma once
 
-#include "../Screen.h"
-#include <vector>
-#include <string>
+#include <memory>
+
+#include "ui/screens/ListScreen.h"
 
 namespace voicerec {
 
-class SettingsScreen : public Screen {
-public:
-    explicit SettingsScreen(App& app);
-
-    void draw(M5Canvas& canvas) override;
-    void onKey(const KeyEvent& event) override;
-
-private:
-    void adjustValue(int delta);
-
-    enum SettingId {
-        VasEnabled,
-        AttackThreshold,
-        HysteresisMargin,
-        Hangover,
-        Bitrate,
-        Brightness,
-        StatusLed,
-        Volume,
-        Count
-    };
-
-    int selectedIndex_ = 0;
-};
+// Settings list: , / change a value, enter toggles or opens; every row explains itself.
+std::unique_ptr<ListScreen> makeSettingsScreen(App& app);
 
 }  // namespace voicerec

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>
 #include "KeyboardInput.h"
+
 #include <M5Cardputer.h>
+
 #include <algorithm>
 
 namespace voicerec {
@@ -10,6 +12,7 @@ namespace {
 
 enum class Modifier : uint8_t { None, Fn, Shift, Ctrl, Alt };
 
+// Keys whose meaning depends on their position rather than the printed character.
 struct PositionKey {
     int x;
     int y;
@@ -47,7 +50,7 @@ void KeyboardInput::update() {
     bool shift = false;
     bool ctrl = false;
     bool alt = false;
-    std::vector<std::pair<char, char>> pressed;
+    std::vector<std::pair<char, char>> pressed;  // (code, shifted text)
 
     for (const Point2D_t& pos : keyboard.keyList()) {
         if (pos.x < 0 || pos.x > 13 || pos.y < 0 || pos.y > 3) {
@@ -72,7 +75,7 @@ void KeyboardInput::update() {
     ctrl_ = ctrl;
     alt_ = alt;
 
-    // Drop released keys
+    // Drop released keys.
     held_.erase(std::remove_if(held_.begin(), held_.end(),
                                [&](const HeldKey& key) {
                                    return std::none_of(pressed.begin(), pressed.end(),
@@ -80,24 +83,32 @@ void KeyboardInput::update() {
                                }),
                 held_.end());
 
-    // New presses and auto-repeat
+    // New presses and auto-repeat.
     for (const auto& [code, shifted] : pressed) {
         auto it = std::find_if(held_.begin(), held_.end(), [&](const HeldKey& key) { return key.code == code; });
         if (it == held_.end()) {
-            HeldKey key{code, shifted, now, now};
+            HeldKey key{code, shifted, now, now, false};
             held_.push_back(key);
             emit(key, false);
-        } else if (now - it->pressedAt >= kRepeatDelayMs && now - it->lastRepeatAt >= kRepeatIntervalMs) {
+        } else if (!it->suppressed && now - it->pressedAt >= kRepeatDelayMs &&
+                   now - it->lastRepeatAt >= kRepeatIntervalMs) {
             it->lastRepeatAt = now;
             emit(*it, true);
         }
     }
 
-    // G0 Button
+    // Side button G0.
     auto& button = M5Cardputer.BtnA;
+    g0Held_ = button.isPressed();
     if (button.wasPressed()) {
-        HeldKey key{keycode::kButtonG0, 0, now, now};
+        HeldKey key{keycode::kButtonG0, 0, now, now, false};
         emit(key, false);
+    }
+}
+
+void KeyboardInput::suppressHeldKeys() {
+    for (HeldKey& key : held_) {
+        key.suppressed = true;
     }
 }
 
@@ -121,9 +132,16 @@ KeyEvent KeyboardInput::nextEvent() {
     if (events_.empty()) {
         return {};
     }
-    KeyEvent ev = events_.front();
+    KeyEvent event = events_.front();
     events_.erase(events_.begin());
-    return ev;
+    return event;
+}
+
+bool KeyboardInput::isHeld(char code) const {
+    if (code == keycode::kButtonG0) {
+        return g0Held_;
+    }
+    return std::any_of(held_.begin(), held_.end(), [&](const HeldKey& key) { return key.code == code; });
 }
 
 }  // namespace voicerec
