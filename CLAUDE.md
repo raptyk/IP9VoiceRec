@@ -13,6 +13,10 @@ UI wzorowane na `../CardputerLGRemote` (te same klasy `App` / `Screen` / `ListSc
 
 - PlatformIO, Arduino, `espressif32@6.9.0`, ESP32-S3, 8 MB, `default_8MB.csv`. `pio run` buduje i kopiuje obrazy do `release/`.
 - `ARDUINO_USB_MODE=1`, `ARDUINO_USB_CDC_ON_BOOT=1`, `serial_baudrate = 0`: UART0 nie może dotykać GPIO43 (zegar mikrofonu/głośnika).
+- **Bez `-ffast-math`**: z nim shine liczył 215,999… zamiast 216 bajtów na ramkę i oznaczał każdą ramkę jako „padded”
+  (pliki 1.0.0/1.1.0 nieodtwarzalne; naprawa: `tools/repair_mp3.py`). `lib/shine/src/layer3.c` liczy teraz sloty
+  na liczbach całkowitych – zmiana względem upstreamu shine, nie nadpisywać przy aktualizacji biblioteki.
+- Weryfikacja nagrania na PC: `ffmpeg -v error -i rec_0001.mp3 -f null -` musi nie wypisać żadnego błędu.
 - `M5.config()`: `internal_mic = true`, `internal_spk = true` – M5Unified ustawia piny (i ES8311 na ADV).
 
 ## Audio – wątki i własność sprzętu

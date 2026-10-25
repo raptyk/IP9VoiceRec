@@ -79,7 +79,6 @@ int shine_samples_per_pass(shine_t s) {
 
 /* Compute default encoding values. */
 shine_global_config *shine_initialise(shine_config_t *pub_config) {
-  double avg_slots_per_frame;
   shine_global_config *config;
 
   if (shine_check_config(pub_config->wave.samplerate, pub_config->mpeg.bitr) <
@@ -119,16 +118,18 @@ shine_global_config *shine_initialise(shine_config_t *pub_config) {
       shine_find_bitrate_index(config->mpeg.bitr, config->mpeg.version);
   config->mpeg.granules_per_frame = granules_per_frame[config->mpeg.version];
 
-  /* Figure average number of 'slots' per frame. */
-  avg_slots_per_frame =
-      ((double)config->mpeg.granules_per_frame * GRANULE_SIZE /
-       ((double)config->wave.samplerate)) *
-      (1000 * (double)config->mpeg.bitr / (double)config->mpeg.bits_per_slot);
-
-  config->mpeg.whole_slots_per_frame = (int)avg_slots_per_frame;
-
-  config->mpeg.frac_slots_per_frame =
-      avg_slots_per_frame - (double)config->mpeg.whole_slots_per_frame;
+  /* Figure average number of 'slots' per frame, in integers: in floating point the result can
+     land a hair below a whole number (215.999... instead of 216 at 16 kHz / 48 kbit/s with
+     -ffast-math), which marks every frame as padded although it is not, and no decoder can
+     follow the stream. */
+  {
+    const long numerator = (long)config->mpeg.granules_per_frame * GRANULE_SIZE *
+                           config->mpeg.bitr * 1000L;
+    const long denominator = (long)config->wave.samplerate * config->mpeg.bits_per_slot;
+    config->mpeg.whole_slots_per_frame = (int)(numerator / denominator);
+    config->mpeg.frac_slots_per_frame =
+        (double)(numerator % denominator) / (double)denominator;
+  }
   config->mpeg.slot_lag = -config->mpeg.frac_slots_per_frame;
 
   if (config->mpeg.frac_slots_per_frame == 0)

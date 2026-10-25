@@ -92,6 +92,16 @@ esptool.py --chip esp32s3 write_flash 0x0 release/VoiceRecCardputer-1.1.0-full.b
 pio run
 ```
 
+## Naprawa nagrań z wersji 1.0.0 i 1.1.0
+
+Te wersje zapisywały w każdym nagłówku ramki MP3 bit „padding”, choć ramki go nie miały, więc żaden odtwarzacz
+nie umiał ich odczytać. Dźwięk w plikach jest cały; skrypt czyści tylko ten bit (tworzy `*_fixed.mp3`,
+z `--in-place` nadpisuje plik):
+
+```bash
+python tools/repair_mp3.py rec_0001.mp3
+```
+
 ---
 
 ## Licencja
