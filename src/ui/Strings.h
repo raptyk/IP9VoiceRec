@@ -7,7 +7,7 @@
 // long texts are word-wrapped by the painter.
 namespace voicerec::str {
 
-constexpr const char* kAppName = "Voice Recorder";
+constexpr const char* kAppName = "IP9 VoiceRec";
 
 // Status bar chips (section of the current screen).
 constexpr const char* kChipApp = "VOICE";
@@ -168,9 +168,9 @@ constexpr const char* kSetStorageText = "Recordings are in the folder /recording
 constexpr const char* kSetAbout = "About";
 constexpr const char* kSetAboutText = "Version, device and memory.";
 constexpr const char* kStorageInfo = "%s free of %s";
-constexpr const char* kAboutTitle = "Voice Recorder %s";
+constexpr const char* kAboutTitle = "IP9 VoiceRec %s";
 constexpr const char* kAboutBody = "%s, free memory %u KB";
-constexpr const char* kAboutDetail = "(c) 2026 Patryk Strzelecki, MIT licence";
+constexpr const char* kAboutDetail = "Patryk Strzelecki, MIT, cardputer.ip9.pl";
 
 // Help
 constexpr const char* kHelpTitle = "Help";

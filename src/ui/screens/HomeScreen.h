@@ -8,21 +8,19 @@ namespace voicerec {
 
 // Start screen: a carousel of large icons (Record, Recordings, Mic check, Settings, Help).
 // Each card explains itself and shows whether it is ready (SD card, calibration).
-class HomeScreen : public Screen {
+class HomeScreen : public ip9::AppScreen<App, ip9::CarouselScreen> {
 public:
-    using Screen::Screen;
+    explicit HomeScreen(App& app);
 
-    void onKey(const KeyEvent& event) override;
-    void draw(M5Canvas& canvas, int top, int height) override;
     const char* footer() const override;
 
-private:
-    void open();
-    void move(int delta);
-
-    int selected_ = 0;
-    int slideDirection_ = 0;  // -1 / +1 during the short slide animation
-    uint32_t slideStartedAt_ = 0;
+protected:
+    CarouselCard card(int index) const override;
+    void drawIcon(M5Canvas& canvas, int index, int cx, int cy, uint16_t colour, float scale,
+                  uint16_t background) const override;
+    void open(int index) override;
+    void openHelp() override;
+    bool onExtraKey(const KeyEvent& event) override;
 };
 
 }  // namespace voicerec

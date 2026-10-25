@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "storage/SdStorage.h"
-#include "ui/screens/ListScreen.h"
+#include "ui/Screen.h"
 
 namespace voicerec {
 

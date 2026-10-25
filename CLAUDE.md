@@ -1,7 +1,17 @@
-# CardputerVoiceRec
+# IP9 VoiceRec
 
 Dyktafon MP3 z aktywacją głosem, kalibracją mikrofonu i odtwarzaczem dla M5Stack Cardputer i Cardputer ADV (ESP32-S3).
-UI wzorowane na `../CardputerLGRemote` (te same klasy `App` / `Screen` / `ListScreen` / `painter`, ta sama paleta i układ).
+Część marki IP9 (https://cardputer.ip9.pl), repozytorium `IP9VoiceRec`.
+
+## Wspólny rdzeń IP9Kit
+
+- Powłoka aplikacji (`ip9::Shell`: stos ekranów, pasek statusu, stopka, toasty, wygaszanie, LED), `ListScreen`,
+  `CarouselScreen`, `HelpScreen`, `ConfirmScreen` / `InfoScreen`, `painter`, `Device`, `KeyboardInput`, `StatusLed`
+  pochodzą z biblioteki **IP9Kit** (osobne repozytorium, `../IP9Kit`).
+- `platformio.ini`: `[ip9kit] source` przypina tag IP9Kit; lokalnie `ip9kit-local.ini` (kopia `.example`,
+  git-ignored) przełącza na `symlink://../IP9Kit`.
+- `src/ui/Screen.h` wprowadza `using namespace ip9;` do `voicerec` i definiuje klasy `Screen` / `ListScreen` aplikacji (z `app_`).
+- Co jest wspólne dla wielu aplikacji – do IP9Kit (z nową wersją i tagiem), nie tutaj.
 
 ## Zasady
 
@@ -61,8 +71,8 @@ UI wzorowane na `../CardputerLGRemote` (te same klasy `App` / `Screen` / `ListSc
 
 ## UI
 
-- `App`: stos ekranów, pasek statusu (chip sekcji + stan karty + bateria), stopka, toasty, wygaszanie (30 s przyciemnienie,
-  wyłączenie wg ustawień; klawisz budzący jest połykany), LED (`hw/StatusLed` z LG Remote).
+- `App` (na `ip9::Shell`): `statusLine()` = chip sekcji + stan karty, `updateStatusLed()` = stan nagrywania,
+  `setDisplayPower()` – 30 s przyciemnienie, wyłączenie wg ustawień (klawisz budzący jest połykany przez Shell).
 - Ekrany: `HomeScreen` (karuzela), `RecordScreen`, `LibraryScreen` + `PlayerScreen`, `MicCheckScreen`,
   ustawienia (`makeSettingsScreen` → `ListScreen`), `HelpScreen`, `ConfirmScreen` / `InfoScreen`.
-- Klawisze jak w LG Remote: `;` `.` `,` `/` strzałki, `esc` to klawisz `` ` ``, `del` = wstecz, `tab` = pomoc, `G0` = enter.
+- Klawisze jak w innych aplikacjach IP9: `;` `.` `,` `/` strzałki, `esc` to klawisz `` ` ``, `del` = wstecz, `tab` = pomoc, `G0` = enter.

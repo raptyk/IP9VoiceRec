@@ -4,7 +4,7 @@
 
 #include <memory>
 
-#include "ui/screens/ListScreen.h"
+#include "ui/Screen.h"
 
 namespace voicerec {
 

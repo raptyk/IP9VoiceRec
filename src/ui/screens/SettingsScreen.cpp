@@ -8,9 +8,8 @@
 
 #include "app/App.h"
 #include "storage/SdStorage.h"
-#include "ui/Painter.h"
+#include "ui/Screen.h"
 #include "ui/Strings.h"
-#include "ui/screens/MessageScreens.h"
 #include "ui/screens/MicCheckScreen.h"
 
 namespace voicerec {

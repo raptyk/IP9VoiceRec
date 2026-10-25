@@ -4,9 +4,8 @@
 
 #include "app/App.h"
 #include "audio/Mp3Info.h"
-#include "ui/Painter.h"
+#include "ui/Screen.h"
 #include "ui/Strings.h"
-#include "ui/screens/MessageScreens.h"
 #include "ui/screens/PlayerScreen.h"
 
 namespace voicerec {

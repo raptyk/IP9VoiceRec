@@ -5,7 +5,6 @@
 #include "app/App.h"
 #include "storage/SdStorage.h"
 #include "ui/Icons.h"
-#include "ui/Painter.h"
 #include "ui/Strings.h"
 #include "ui/Theme.h"
 #include "ui/screens/HelpScreen.h"
@@ -34,12 +33,6 @@ constexpr Card kCards[] = {
     {icons::Icon::Help, str::kCardHelpTitle, CardKind::Help, theme::kSurface},
 };
 constexpr int kCardCount = sizeof(kCards) / sizeof(kCards[0]);
-constexpr uint32_t kSlideMs = 140;
-
-struct CardStatus {
-    String text;
-    uint16_t colour;
-};
 
 // "190 h" / "45 min" of recording that fits on the card.
 String recordingTimeLeft(uint64_t freeBytes, uint8_t kbps) {
@@ -55,56 +48,24 @@ String recordingTimeLeft(uint64_t freeBytes, uint8_t kbps) {
 
 }  // namespace
 
-void HomeScreen::move(int delta) {
-    selected_ = (selected_ + delta + kCardCount) % kCardCount;
-    slideDirection_ = delta;
-    slideStartedAt_ = millis();
-    app_.invalidate();
-}
+HomeScreen::HomeScreen(App& app) : AppScreen(app, kCardCount) {}
 
-void HomeScreen::onKey(const KeyEvent& event) {
-    switch (event.code) {
-        case keycode::kLeft:
-        case keycode::kUp:
-            move(-1);
-            return;
-        case keycode::kRight:
-            if (event.shift) {
-                app_.push(std::make_unique<HelpScreen>(app_));  // "?"
-                return;
-            }
-            move(1);
-            return;
-        case keycode::kDown:
-            move(1);
-            return;
-        case keycode::kTab:
-            if (!event.repeat) {
-                app_.push(std::make_unique<HelpScreen>(app_));
-            }
-            return;
-        case keycode::kEnter:
-        case keycode::kButtonG0:
-            if (!event.repeat) {
-                open();
-            }
-            return;
-        case 'r':
-            if (!event.repeat) {
-                app_.startRecording();
-            }
-            return;
-        default:
-            if (!event.repeat && event.code >= '1' && event.code < '1' + kCardCount) {
-                selected_ = event.code - '1';
-                open();
-            }
-            return;
+bool HomeScreen::onExtraKey(const KeyEvent& event) {
+    if (event.code != 'r') {
+        return false;
     }
+    if (!event.repeat) {
+        app_.startRecording();
+    }
+    return true;
 }
 
-void HomeScreen::open() {
-    switch (kCards[selected_].kind) {
+void HomeScreen::openHelp() {
+    app_.push(std::make_unique<HelpScreen>(app_));
+}
+
+void HomeScreen::open(int index) {
+    switch (kCards[index].kind) {
         case CardKind::Record:
             app_.startRecording();
             break;
@@ -118,7 +79,7 @@ void HomeScreen::open() {
             app_.push(makeSettingsScreen(app_));
             break;
         case CardKind::Help:
-            app_.push(std::make_unique<HelpScreen>(app_));
+            openHelp();
             break;
     }
 }
@@ -127,109 +88,77 @@ const char* HomeScreen::footer() const {
     return str::kFooterHome;
 }
 
-void HomeScreen::draw(M5Canvas& canvas, int top, int height) {
+void HomeScreen::drawIcon(M5Canvas& canvas, int index, int cx, int cy, uint16_t colour, float scale,
+                          uint16_t background) const {
+    icons::draw(canvas, kCards[index].icon, cx, cy, colour, scale, background);
+}
+
+CarouselCard HomeScreen::card(int index) const {
     using namespace theme;
-    const Card& card = kCards[selected_];
-    const int centerX = kScreenWidth / 2;
+    const Card& card = kCards[index];
     const Settings& settings = app_.settings();
     SdStorage& storage = SdStorage::instance();
 
-    // Short slide-in of the selected icon.
-    int offset = 0;
-    const uint32_t age = millis() - slideStartedAt_;
-    if (slideDirection_ != 0 && age < kSlideMs) {
-        offset = slideDirection_ * static_cast<int>(30 * (kSlideMs - age) / kSlideMs);
-        app_.invalidate();
-    }
-
-    // Neighbour previews and chevrons hint that the list scrolls sideways.
-    const int iconY = top + 24;
-    const Card& previous = kCards[(selected_ + kCardCount - 1) % kCardCount];
-    const Card& next = kCards[(selected_ + 1) % kCardCount];
-    icons::draw(canvas, previous.icon, 34, iconY, kSurfaceHigh, 0.55f, kBackground);
-    icons::draw(canvas, next.icon, kScreenWidth - 34, iconY, kSurfaceHigh, 0.55f, kBackground);
-    canvas.fillTriangle(6, iconY, 12, iconY - 6, 12, iconY + 6, kTextMuted);
-    canvas.fillTriangle(kScreenWidth - 6, iconY, kScreenWidth - 12, iconY - 6, kScreenWidth - 12, iconY + 6,
-                        kTextMuted);
-
-    canvas.fillRoundRect(centerX - 26 + offset, iconY - 22, 52, 44, 10, card.colour);
-    icons::draw(canvas, card.icon, centerX + offset, iconY, kText, 0.9f, card.colour);
-
-    canvas.setTextSize(1);
-    canvas.setFont(&fonts::FreeSansBold9pt7b);
-    canvas.setTextColor(kText);
-    canvas.setTextDatum(top_center);
-    painter::drawClippedText(canvas, card.title, centerX, top + 49, kScreenWidth - 2 * kPadding);
-
     // Status line: is this ready, or what is missing?
-    CardStatus status{String(), kTextMuted};
+    CarouselCard result{card.title, nullptr, card.colour, String(), kTextMuted, 0.9f};
     char buffer[64];
-    const char* text = nullptr;
     switch (card.kind) {
         case CardKind::Record:
-            text = settings.voiceActivation ? str::kCardRecordText : str::kCardRecordTextAlways;
+            result.text = settings.voiceActivation ? str::kCardRecordText : str::kCardRecordTextAlways;
             if (!storage.mounted()) {
-                status = {str::kInsertCard, kWarn};
+                result.status = str::kInsertCard;
+                result.statusColour = kWarn;
             } else if (storage.freeBytes() < (1 << 20)) {
-                status = {str::kCardFull, kError};
+                result.status = str::kCardFull;
+                result.statusColour = kError;
             } else {
                 snprintf(buffer, sizeof(buffer), str::kReadySpace,
                          recordingTimeLeft(storage.freeBytes(), settings.bitrateKbps).c_str());
-                status = {buffer, kOk};
+                result.status = buffer;
+                result.statusColour = kOk;
             }
             break;
         case CardKind::Library: {
-            text = str::kCardLibraryText;
+            result.text = str::kCardLibraryText;
             const size_t count = storage.recordingCount();
             if (!storage.mounted()) {
-                status = {str::kInsertCard, kWarn};
+                result.status = str::kInsertCard;
+                result.statusColour = kWarn;
             } else if (count == 0) {
-                status = {str::kRecordingsNone, kTextMuted};
+                result.status = str::kRecordingsNone;
             } else {
                 snprintf(buffer, sizeof(buffer), count == 1 ? str::kRecordingsOne : str::kRecordingsCount,
                          static_cast<unsigned>(count));
-                status = {buffer, kOk};
+                result.status = buffer;
+                result.statusColour = kOk;
             }
             break;
         }
         case CardKind::MicCheck:
-            text = str::kCardMicCheckText;
+            result.text = str::kCardMicCheckText;
             if (settings.calibrated) {
                 snprintf(buffer, sizeof(buffer), str::kCalibrated, settings.micGainDb);
-                status = {buffer, kOk};
+                result.status = buffer;
+                result.statusColour = kOk;
             } else {
-                status = {str::kNotCalibrated, kWarn};
+                result.status = str::kNotCalibrated;
+                result.statusColour = kWarn;
             }
             break;
         case CardKind::Settings:
-            text = str::kCardSettingsText;
+            result.text = str::kCardSettingsText;
             if (settings.voiceActivation) {
                 snprintf(buffer, sizeof(buffer), str::kSettingsSummaryOn, settings.sensitivity);
-                status = {buffer, kTextMuted};
+                result.status = buffer;
             } else {
-                status = {str::kSettingsSummaryOff, kTextMuted};
+                result.status = str::kSettingsSummaryOff;
             }
             break;
         case CardKind::Help:
-            text = str::kCardHelpText;
+            result.text = str::kCardHelpText;
             break;
     }
-
-    canvas.setFont(&fonts::Font0);
-    int textTop = top + 66;
-    if (!status.text.isEmpty()) {
-        const int width = min<int>(canvas.textWidth(status.text), kScreenWidth - 40);
-        const int x = centerX - width / 2;
-        canvas.fillCircle(x - 7, textTop + 3, 3, status.colour);
-        canvas.setTextColor(status.colour);
-        canvas.setTextDatum(top_left);
-        painter::drawClippedText(canvas, status.text, x, textTop, kScreenWidth - 40);
-        textTop += 12;
-    }
-    canvas.setTextColor(kTextMuted);
-    canvas.setTextDatum(top_center);
-    const int lines = (top + height - textTop) / 10;
-    painter::drawWrappedText(canvas, text, centerX, textTop, kScreenWidth - 2 * kPadding - 8, 10, lines);
+    return result;
 }
 
 }  // namespace voicerec

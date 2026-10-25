@@ -1,0 +1,4 @@
+; Local IP9Kit: builds against ../IP9Kit instead of the pinned release.
+; Copy to ip9kit-local.ini (git-ignored).
+[ip9kit]
+source = symlink://../IP9Kit

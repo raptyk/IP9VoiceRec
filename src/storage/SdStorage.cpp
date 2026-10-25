@@ -6,13 +6,11 @@
 
 #include <algorithm>
 
+#include "ip9/hw/Pins.h"
+
 namespace voicerec {
 
 namespace {
-constexpr int8_t kSdSck = 40;
-constexpr int8_t kSdMiso = 39;
-constexpr int8_t kSdMosi = 14;
-constexpr int8_t kSdCs = 12;
 constexpr uint32_t kSdFrequency = 20000000;
 // Without a card SD.begin() takes a moment; do not retry on every call.
 constexpr uint32_t kMountRetryMs = 4000;
@@ -43,8 +41,8 @@ SdStorage::SdStorage() : lock_(xSemaphoreCreateRecursiveMutex()), spi_(FSPI) {}
 
 bool SdStorage::mount() {
     lastMountAttemptAt_ = millis();
-    spi_.begin(kSdSck, kSdMiso, kSdMosi, kSdCs);
-    mounted_ = SD.begin(kSdCs, spi_, kSdFrequency);
+    spi_.begin(ip9::pins::kSdSck, ip9::pins::kSdMiso, ip9::pins::kSdMosi, ip9::pins::kSdCs);
+    mounted_ = SD.begin(ip9::pins::kSdCs, spi_, kSdFrequency);
     if (!mounted_) {
         SD.end();
         return false;

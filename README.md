@@ -1,9 +1,10 @@
-# CardputerVoiceRec
+# IP9 VoiceRec
 
 Dyktafon cyfrowy dla **M5Stack Cardputer** i **Cardputer ADV** (ESP32-S3): nagrywa do plików **MP3** na kartę SD,
 z **aktywacją głosem**, która pomija ciszę, kalibracją mikrofonu i wbudowanym odtwarzaczem.
-Interfejs w stylu [LG Remote](../CardputerLGRemote): karuzela kart na starcie, kolorowe ekrany sekcji, rysowane klawisze,
-podpowiedzi w stopce i opis każdej opcji.
+Jedna z aplikacji IP9 dla Cardputera – **https://cardputer.ip9.pl**. Interfejs wspólny z innymi aplikacjami IP9
+(m.in. [IP9 LG Remote](https://github.com/raptyk/IP9LGRemote)): karuzela kart na starcie, kolorowe ekrany sekcji,
+rysowane klawisze, podpowiedzi w stopce i opis każdej opcji.
 
 ---
 
@@ -79,18 +80,25 @@ podpowiedzi w stopce i opis każdej opcji.
 
 Kompilacja tworzy w `release/`:
 
-1. `VoiceRecCardputer-<wersja>.bin` – sama aplikacja, do uruchomienia z karty SD przez **M5Launcher**,
-2. `VoiceRecCardputer-<wersja>-full.bin` – pełny obraz (bootloader + partycje + aplikacja) pod adres `0x0`.
+1. `IP9VoiceRec-<wersja>.bin` – sama aplikacja, do uruchomienia z karty SD przez **M5Launcher**,
+2. `IP9VoiceRec-<wersja>-full.bin` – pełny obraz (bootloader + partycje + aplikacja) pod adres `0x0`.
 
 ```bash
-esptool.py --chip esp32s3 write_flash 0x0 release/VoiceRecCardputer-1.1.0-full.bin
+esptool.py --chip esp32s3 write_flash 0x0 release/IP9VoiceRec-1.2.0-full.bin
 ```
 
 ## Kompilacja
 
+Wymaga [PlatformIO](https://platformio.org/). Wspólny rdzeń aplikacji IP9, [IP9Kit](https://github.com/raptyk/IP9Kit)
+(powłoka aplikacji, menu, karuzela, pomoc, okienka, klawiatura, dioda LED, bateria), PlatformIO pobiera w wersji
+przypiętej w `platformio.ini`.
+
 ```bash
 pio run
 ```
+
+Praca nad IP9Kit razem z dyktafonem: sklonuj IP9Kit obok tego katalogu (`../IP9Kit`) i skopiuj
+`ip9kit-local.ini.example` do `ip9kit-local.ini`.
 
 ## Naprawa nagrań z wersji 1.0.0 i 1.1.0
 
@@ -107,3 +115,4 @@ python tools/repair_mp3.py rec_0001.mp3
 ## Licencja
 
 MIT. Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>.
+Repozytorium: https://github.com/raptyk/IP9VoiceRec · więcej aplikacji IP9: https://cardputer.ip9.pl

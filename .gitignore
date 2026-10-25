@@ -1,3 +1,5 @@
 .pio/
 .vscode/
 .idea/
+release/
+ip9kit-local.ini
