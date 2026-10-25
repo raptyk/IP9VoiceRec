@@ -8,7 +8,7 @@
 
 namespace voicerec {
 
-static const char* TAG = "AudioPlayer";
+[[maybe_unused]] static const char* TAG = "AudioPlayer";
 
 AudioPlayer::AudioPlayer() {
     decoder_.setDataCallback(onDecodedPcm);
@@ -53,7 +53,7 @@ bool AudioPlayer::play(const std::string& filePath) {
     totalDurationSec_.store(static_cast<uint32_t>(fileSizeBytes_ / 6000));
     currentPositionSec_.store(0);
 
-    // Switch hardware to playback mode
+    // Switch hardware to playback mode (closes mic first)
     if (!AudioModeManager::instance().setMode(AudioMode::Playback)) {
         ESP_LOGE(TAG, "Failed to switch hardware to Playback mode");
         audioFile_.close();
@@ -156,9 +156,13 @@ void AudioPlayer::onDecodedPcm(MP3FrameInfo& info, short* pcmBuffer, size_t len,
         return;
     }
 
-    // Wait if speaker queue is full (channel 0 returns 2 when queue has no room)
-    while (M5.Speaker.isPlaying(0) >= 2) {
+    // Real-time pacing: wait until speaker finishes reading previous buffer
+    while (M5.Speaker.isPlaying(0) != 0 && AudioPlayer::instance().isPlaying()) {
         vTaskDelay(pdMS_TO_TICKS(2));
+    }
+
+    if (!AudioPlayer::instance().isPlaying()) {
+        return;
     }
 
     // len is number of samples (bytes / 2)
@@ -169,7 +173,7 @@ void AudioPlayer::onDecodedPcm(MP3FrameInfo& info, short* pcmBuffer, size_t len,
         info.samprate,
         info.nChans > 1,
         1,  // repeat count
-        0   // channel
+        0   // channel 0
     );
 }
 

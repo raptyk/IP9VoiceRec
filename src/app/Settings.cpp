@@ -7,7 +7,7 @@
 
 namespace voicerec {
 
-static const char* TAG = "Settings";
+[[maybe_unused]] static const char* TAG = "Settings";
 
 bool Settings::load() {
     if (!SdStorage::instance().ensureMounted()) {

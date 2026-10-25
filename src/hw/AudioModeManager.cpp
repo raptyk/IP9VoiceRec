@@ -6,7 +6,7 @@
 
 namespace voicerec {
 
-static const char* TAG = "AudioModeMgr";
+[[maybe_unused]] static const char* TAG = "AudioModeMgr";
 
 void AudioModeManager::begin() {
     // Both peripherals start in closed/idle state
@@ -63,7 +63,12 @@ bool AudioModeManager::setMode(AudioMode mode) {
             auto micCfg = M5.Mic.config();
             micCfg.sample_rate = 16000;
             micCfg.over_sampling = 2;
-            micCfg.magnification = 16;
+            // Cardputer ADV uses ES8311 codec with built-in analog PGA; standard Cardputer uses PDM MEMS
+            if (M5.getBoard() == m5::board_t::board_M5CardputerADV) {
+                micCfg.magnification = 2;
+            } else {
+                micCfg.magnification = 16;
+            }
             M5.Mic.config(micCfg);
             success = M5.Mic.begin();
             if (!success) {

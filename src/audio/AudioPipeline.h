@@ -61,6 +61,7 @@ private:
 
     static void captureTaskTrampoline(void* arg);
     static void writerTaskTrampoline(void* arg);
+    static void micBufferReleaseCallback(void* arg, void* data, size_t length);
 
     void captureTaskLoop();
     void writerTaskLoop();
@@ -72,6 +73,10 @@ private:
     VadEngine vad_;
     PreRollBuffer preRoll_;
     Mp3Encoder encoder_;
+
+    // Ping-pong DMA buffers
+    int16_t dmaBuf_[2][kSamplesPerFrame];
+    std::atomic<int16_t*> recDone_{nullptr};
 
     StreamBufferHandle_t streamBuffer_ = nullptr;
     TaskHandle_t captureTaskHandle_ = nullptr;

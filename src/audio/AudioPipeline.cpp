@@ -9,7 +9,7 @@
 
 namespace voicerec {
 
-static const char* TAG = "AudioPipeline";
+[[maybe_unused]] static const char* TAG = "AudioPipeline";
 
 AudioPipeline::AudioPipeline() = default;
 
@@ -151,27 +151,59 @@ void AudioPipeline::captureTaskTrampoline(void* arg) {
     static_cast<AudioPipeline*>(arg)->captureTaskLoop();
 }
 
+void AudioPipeline::micBufferReleaseCallback(void* arg, void* data, size_t length) {
+    (void)length;
+    auto* pipe = static_cast<AudioPipeline*>(arg);
+    pipe->recDone_.store(static_cast<int16_t*>(data), std::memory_order_release);
+    if (pipe->captureTaskHandle_) {
+        xTaskNotifyGive(pipe->captureTaskHandle_);
+    }
+}
+
 void AudioPipeline::captureTaskLoop() {
-    int16_t frame[kSamplesPerFrame];
+    int16_t localFrame[kSamplesPerFrame];
+    bool dmaArmed = false;
 
     while (true) {
-        // Record audio when in Record mode or Calibrating
-        if (AudioModeManager::instance().currentMode() == AudioMode::Record) {
-            if (M5.Mic.isEnabled() && M5.Mic.record(frame, kSamplesPerFrame, kSampleRate)) {
-                // 1. High-Pass DC filter
-                dcBlocker_.process(frame, kSamplesPerFrame);
+        const AudioMode mode = AudioModeManager::instance().currentMode();
+
+        if (mode == AudioMode::Record) {
+            if (!dmaArmed) {
+                // Initialize ping-pong DMA with buffer release callback
+                recDone_.store(nullptr);
+                M5.Mic.setBufferReleaseCallback(this, micBufferReleaseCallback);
+
+                // Queue both slots into M5Unified DMA
+                M5.Mic.record(dmaBuf_[0], kSamplesPerFrame, kSampleRate);
+                M5.Mic.record(dmaBuf_[1], kSamplesPerFrame, kSampleRate);
+                dmaArmed = true;
+            }
+
+            // Wait for I2S DMA interrupt notification (timeout 100 ms)
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+            int16_t* completed = recDone_.exchange(nullptr, std::memory_order_acq_rel);
+
+            if (completed != nullptr) {
+                // Re-arm this slot immediately so hardware continues uninterrupted
+                M5.Mic.record(completed, kSamplesPerFrame, kSampleRate);
+
+                // Copy to local frame for safe DSP processing
+                std::memcpy(localFrame, completed, sizeof(localFrame));
+
+                // 1. High-Pass DC Blocker
+                dcBlocker_.process(localFrame, kSamplesPerFrame);
 
                 // 2. VAD processing
-                VadFrameResult vadRes = vad_.processFrame(frame, kSamplesPerFrame);
+                VadFrameResult vadRes = vad_.processFrame(localFrame, kSamplesPerFrame);
 
-                // Update atomic live meters for UI
+                // Update live atomic levels for UI
                 liveRmsDbfs_.store(vadRes.rmsDbfs);
                 livePeakDbfs_.store(vadRes.peakDbfs);
                 liveVadState_.store(vadRes.state);
 
                 // Calibration check
                 if (vad_.isCalibrating()) {
-                    vad_.addCalibrationFrame(frame, kSamplesPerFrame);
+                    vad_.addCalibrationFrame(localFrame, kSamplesPerFrame);
                 }
 
                 // Audio recording pipeline
@@ -181,7 +213,7 @@ void AudioPipeline::captureTaskLoop() {
                     if (vadRes.isWriting()) {
                         speechDurationMs_ += static_cast<uint32_t>(kFrameDurationMs);
 
-                        // If voice triggered from silence, first flush pre-roll history!
+                        // If voice was triggered from silence, first flush pre-roll history!
                         if (vadRes.speechTriggered) {
                             preRoll_.flush([this](const int16_t* hist, size_t count) {
                                 if (streamBuffer_) {
@@ -192,21 +224,23 @@ void AudioPipeline::captureTaskLoop() {
 
                         // Send speech frame to stream buffer
                         if (streamBuffer_) {
-                            xStreamBufferSend(streamBuffer_, frame, sizeof(frame), 0);
+                            xStreamBufferSend(streamBuffer_, localFrame, sizeof(localFrame), 0);
                         }
                     } else {
                         // In silence: store frame into pre-roll ring buffer
-                        preRoll_.pushFrame(frame);
+                        preRoll_.pushFrame(localFrame);
 
                         // If we just entered silence, request safe file flush
                         flushRequested_.store(true);
                     }
                 }
-            } else {
-                vTaskDelay(pdMS_TO_TICKS(2));
             }
         } else {
-            // Idle or playback mode
+            // Not in record mode
+            if (dmaArmed) {
+                dmaArmed = false;
+                M5.Mic.setBufferReleaseCallback(nullptr, nullptr);
+            }
             vTaskDelay(pdMS_TO_TICKS(20));
         }
     }
@@ -312,17 +346,19 @@ void AudioPipeline::flushStagingToSd(bool forceSync) {
     size_t toWrite = forceSync ? stagingCount_ : (stagingCount_ / 512) * 512;
     if (toWrite > 0) {
         size_t written = activeFile_.write(stagingBuffer_, toWrite);
-        totalWrittenBytes_ += written;
-
-        // Shift any remainder in staging buffer
-        size_t remainder = stagingCount_ - toWrite;
-        if (remainder > 0) {
-            std::memmove(stagingBuffer_, stagingBuffer_ + toWrite, remainder);
+        if (written > 0) {
+            totalWrittenBytes_ += written;
+            size_t remainder = stagingCount_ - written;
+            if (remainder > 0) {
+                std::memmove(stagingBuffer_, stagingBuffer_ + written, remainder);
+            }
+            stagingCount_ = remainder;
+        } else {
+            ESP_LOGW(TAG, "SD write returned 0 bytes (card full or error)");
         }
-        stagingCount_ = remainder;
     }
 
-    if (forceSync) {
+    if (forceSync && activeFile_) {
         activeFile_.flush();
     }
 }

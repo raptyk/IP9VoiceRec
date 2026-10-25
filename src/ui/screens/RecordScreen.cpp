@@ -12,7 +12,7 @@
 
 namespace voicerec {
 
-static const char* TAG = "RecordScreen";
+[[maybe_unused]] static const char* TAG = "RecordScreen";
 
 RecordScreen::RecordScreen(App& app)
     : Screen(app) {

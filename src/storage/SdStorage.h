@@ -7,6 +7,8 @@
 #include <SPI.h>
 #include <vector>
 #include <string>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 namespace voicerec {
 
@@ -28,9 +30,9 @@ public:
     bool isMounted() const { return mounted_; }
     bool ensureMounted();
 
-    uint64_t totalBytes() const;
-    uint64_t usedBytes() const;
-    uint64_t freeBytes() const;
+    uint64_t totalBytes();
+    uint64_t usedBytes();
+    uint64_t freeBytes();
 
     std::vector<RecordingFile> listRecordings();
     std::string generateNextRecordingPath();
@@ -39,13 +41,18 @@ public:
     File openFile(const char* path, const char* mode);
     bool fileExists(const char* path);
 
+    void lock();
+    void unlock();
+
     static constexpr const char* kRecordingsDir = "/recordings";
     static constexpr const char* kConfigDir = "/config";
 
 private:
     SdStorage();
+    ~SdStorage();
 
     SPIClass sdSpi_;
+    SemaphoreHandle_t mutex_ = nullptr;
     bool mounted_ = false;
     uint32_t lastMountAttemptAt_ = 0;
 };

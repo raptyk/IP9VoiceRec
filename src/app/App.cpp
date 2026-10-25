@@ -14,16 +14,16 @@
 
 namespace voicerec {
 
-static const char* TAG = "App";
+[[maybe_unused]] static const char* TAG = "App";
 
 App::App()
     : canvas_(&M5.Display) {}
 
 void App::begin() {
     auto cfg = M5.config();
-    cfg.internal_mic = false; // Initialized manually via AudioModeManager
-    cfg.internal_spk = false; // Initialized manually via AudioModeManager
-    cfg.serial_baudrate = 0;  // Never use UART0 on GPIO 43/44
+    cfg.internal_mic = true; // Sets up pins and ES8311 callbacks in M5Unified
+    cfg.internal_spk = true; // Sets up pins in M5Unified
+    cfg.serial_baudrate = 0; // Never use UART0 on GPIO 43/44
     M5Cardputer.begin(cfg, true);
     M5.Display.setRotation(1);
 
