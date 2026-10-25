@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 – 2026-10-25
+
+- **Auto level**: recordings that came out too quiet to hear (distant or soft voice, low mic gain, no calibration)
+  are now raised to a clear, steady level while they are written; loud voices are brought down before the limiter.
+  Lookahead of 288 ms (the gain is ready for the first syllable, knocks and shouts are not clipped), only voiced
+  frames count (no pumping in pauses), noise never raised above -42 dBFS, range -12..+30 dB. On by default,
+  *Settings > Auto level*; the record screen shows the current gain ("auto +18").
+- Host simulation of the recording chain, `tools/autogain_sim.cpp` (14 scenarios).
+
 ## 1.2.0 – 2026-10-25
 
 - Part of the IP9 apps (https://cardputer.ip9.pl): the recorder is now **IP9 VoiceRec**, the

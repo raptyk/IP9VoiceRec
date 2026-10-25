@@ -20,6 +20,10 @@ float dbToGain(float db);
 // close to the microphone is compressed instead of clipped hard. Returns true if limited.
 bool applyGain(int16_t* samples, size_t count, float gain);
 
+// Like applyGain, with the gain moving linearly from `startGain` to `endGain` across the
+// samples, so a gain change between frames never clicks.
+bool applyGainRamp(int16_t* samples, size_t count, float startGain, float endGain);
+
 // RMS and peak of a frame in dBFS (kSilenceDbfs for digital silence).
 FrameLevel measure(const int16_t* samples, size_t count);
 

@@ -19,8 +19,15 @@ float dbToGain(float db) {
 }
 
 bool applyGain(int16_t* samples, size_t count, float gain) {
+    return applyGainRamp(samples, count, gain, gain);
+}
+
+bool applyGainRamp(int16_t* samples, size_t count, float startGain, float endGain) {
     bool limited = false;
+    const float step = count > 0 ? (endGain - startGain) / count : 0.0f;
+    float gain = startGain;
     for (size_t i = 0; i < count; ++i) {
+        gain += step;
         float value = samples[i] * gain;
         const float magnitude = fabsf(value);
         if (magnitude > kKnee) {

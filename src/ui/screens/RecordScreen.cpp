@@ -236,8 +236,15 @@ void RecordScreen::drawMiddle(M5Canvas& canvas, int top, int height) {
         painter::drawWrappedText(canvas, str::kMicStarting, right, lineTop + 12, maxWidth, 11, 2);
         return;
     }
-    painter::drawClippedText(canvas, painter::formatBytes(recorder.bytesWritten()), right, lineTop + 12, maxWidth);
     char text[40];
+    const String bytes = painter::formatBytes(recorder.bytesWritten());
+    if (recorder.autoLevelActive()) {
+        snprintf(text, sizeof(text), str::kBytesAutoLevel, bytes.c_str(),
+                 static_cast<int>(lroundf(recorder.autoGainDb())));
+    } else {
+        snprintf(text, sizeof(text), "%s", bytes.c_str());
+    }
+    painter::drawClippedText(canvas, text, right, lineTop + 12, maxWidth);
     if (app_.settings().voiceActivation) {
         const uint32_t skipped = recorder.elapsedMs() > recorder.audioMs() ? recorder.elapsedMs() - recorder.audioMs() : 0;
         snprintf(text, sizeof(text), str::kSkipped, painter::formatDuration(skipped).c_str());

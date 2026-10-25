@@ -73,6 +73,7 @@ constexpr const char* kBandPaused = "PAUSED";
 constexpr const char* kBandSaving = "SAVING...";
 constexpr const char* kSkipped = "silence skipped %s";
 constexpr const char* kRecordsEverything = "records everything";
+constexpr const char* kBytesAutoLevel = "%s, auto %+d";  // file size, Auto level gain in dB
 constexpr const char* kSpaceLeft = "%s left";
 constexpr const char* kFooterRecord = "[ ] sensitivity  - = gain  tab help";
 constexpr const char* kToastSensitivity = "Sensitivity %u: %s";
@@ -151,6 +152,8 @@ constexpr const char* kSetHold = "Keep after voice";
 constexpr const char* kSetHoldText = "How long recording goes on after the voice stops. Keeps short pauses.";
 constexpr const char* kSetGain = "Mic gain";
 constexpr const char* kSetGainText = "Amplifies the microphone. Mic check calibration sets it for you.";
+constexpr const char* kSetAutoLevel = "Auto level";
+constexpr const char* kSetAutoLevelText = "Lifts quiet or distant speech to a clear level in the file.";
 constexpr const char* kSetQuality = "Quality";
 constexpr const char* kSetQualityText = "MP3 bitrate. 32: 14 MB/h, 48: 21 MB/h (speech), 64: 28 MB/h.";
 constexpr const char* kSetVolume = "Speaker volume";

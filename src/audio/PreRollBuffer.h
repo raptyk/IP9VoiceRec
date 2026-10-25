@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "audio/AudioConfig.h"
+#include "audio/AutoGain.h"
 
 namespace voicerec {
 
@@ -15,14 +16,18 @@ class PreRollBuffer {
 public:
     void reset() { count_ = 0; head_ = 0; }
 
-    void push(const int16_t* frame);
+    void push(const int16_t* frame, const FrameInfo& info);
 
     size_t count() const { return count_; }
     // i = 0 is the oldest stored frame.
     const int16_t* frame(size_t i) const;
+    const FrameInfo& info(size_t i) const;
 
 private:
+    size_t slot(size_t i) const;
+
     int16_t frames_[kPreRollFrames][kSamplesPerFrame] = {};
+    FrameInfo infos_[kPreRollFrames];
     size_t head_ = 0;   // next write slot
     size_t count_ = 0;  // stored frames (up to kPreRollFrames)
 };

@@ -40,6 +40,7 @@ void Recorder::configure(const RecorderConfig& config) {
     sensitivity_ = config.sensitivity;
     holdMs_ = config.holdMs;
     startNoise_ = config.noiseFloorDbfs;
+    autoLevel_ = config.autoLevel;
     configChanged_ = true;
 }
 
@@ -79,6 +80,12 @@ StartResult Recorder::start(const String& path, uint8_t bitrateKbps) {
     writeError_ = false;
     micFailed_ = false;
     xQueueReset(writerQueue_);
+    // The writer is idle (state Idle), so its Auto level state can be prepared from here.
+    autoLevelSession_ = autoLevel_.load();
+    autoGain_.beginSession();
+    lookaheadHead_ = 0;
+    lastAutoGain_ = dsp::dbToGain(autoGain_.currentGainDb());
+    autoGainDb_ = autoGain_.currentGainDb();
 
     // Hand-over: everything above is visible to the tasks once they see the open session.
     state_ = RecorderState::Starting;
@@ -220,6 +227,12 @@ void Recorder::processFrame(int16_t* frame) {
     }
     const dsp::FrameLevel level = dsp::measure(frame, kSamplesPerFrame);
     const VoiceDecision decision = detector_.process(level.rmsDbfs);
+    FrameInfo info;
+    info.rmsDbfs = level.rmsDbfs;
+    info.peakDbfs = level.peakDbfs;
+    info.noiseDbfs = detector_.noiseFloor();
+    info.voiced = decision.state == VoiceState::Voice;
+    info.inputGainDb = static_cast<int8_t>(appliedGainDb_);
 
     level_ = level.rmsDbfs;
     peak_ = level.peakDbfs;
@@ -235,11 +248,11 @@ void Recorder::processFrame(int16_t* frame) {
     }
 
     if (sessionOpen_) {
-        handleRecording(frame, decision);
+        handleRecording(frame, decision, info);
     }
 }
 
-void Recorder::handleRecording(const int16_t* frame, const VoiceDecision& decision) {
+void Recorder::handleRecording(const int16_t* frame, const VoiceDecision& decision, const FrameInfo& info) {
     if (!sessionStarted_) {
         // First frame after the warm-up: the recording really begins now.
         sessionStarted_ = true;
@@ -255,27 +268,28 @@ void Recorder::handleRecording(const int16_t* frame, const VoiceDecision& decisi
     ++framesSeen_;
 
     if (!voiceActivation_) {
-        sendFrame(frame);
+        sendFrame(frame, info);
         return;
     }
     if (decision.writing) {
         if (decision.onset) {
             for (size_t i = 0; i < preRoll_.count(); ++i) {
-                sendFrame(preRoll_.frame(i));
+                sendFrame(preRoll_.frame(i), preRoll_.info(i));
             }
             preRoll_.reset();
         }
-        sendFrame(frame);
+        sendFrame(frame, info);
     } else {
-        preRoll_.push(frame);
+        preRoll_.push(frame, info);
         if (decision.released) {
             sendControl(WriterOp::Sync);  // a voice segment ended: make it safe on the card
         }
     }
 }
 
-void Recorder::sendFrame(const int16_t* frame) {
+void Recorder::sendFrame(const int16_t* frame, const FrameInfo& info) {
     outgoing_.op = WriterOp::Frame;
+    outgoing_.info = info;
     memcpy(outgoing_.pcm, frame, kBytesPerFrame);
     if (xQueueSend(writerQueue_, &outgoing_, 0) == pdTRUE) {
         ++framesWritten_;
@@ -314,9 +328,7 @@ void Recorder::writerLoop() {
                 if (!encoder_.isOpen() || writeError_) {
                     break;
                 }
-                int length = 0;
-                const uint8_t* mp3 = encoder_.encodeFrame(incoming_.pcm, &length);
-                writeEncoded(mp3, length);
+                writeFrame(incoming_.pcm, incoming_.info);
                 if (millis() - lastSyncAt_ > kSyncIntervalMs) {
                     writeStaging(true);
                     file_.flush();
@@ -325,6 +337,8 @@ void Recorder::writerLoop() {
                 break;
             }
             case WriterOp::Sync:
+                // End of a voice segment or a pause: everything heard so far goes to the card.
+                flushLookahead();
                 if (file_) {
                     writeStaging(true);
                     file_.flush();
@@ -332,10 +346,51 @@ void Recorder::writerLoop() {
                 }
                 break;
             case WriterOp::Close:
+                flushLookahead();
                 finishFile();
                 break;
         }
     }
+}
+
+void Recorder::writeFrame(const int16_t* pcm, const FrameInfo& info) {
+    if (!autoLevelSession_) {
+        encodePcm(pcm);
+        return;
+    }
+    // The frame waits in the lookahead window; the oldest one leaves with its gain.
+    if (autoGain_.full()) {
+        writeOldestLookahead();
+    }
+    const size_t slot = (lookaheadHead_ + autoGain_.pending()) % AutoGain::kLookaheadFrames;
+    memcpy(lookahead_[slot], pcm, kBytesPerFrame);
+    autoGain_.observe(info);
+}
+
+void Recorder::writeOldestLookahead() {
+    int16_t* pcm = lookahead_[lookaheadHead_];
+    const float gainDb = autoGain_.takeGainDb();
+    const float gain = dsp::dbToGain(gainDb);
+    dsp::applyGainRamp(pcm, kSamplesPerFrame, lastAutoGain_, gain);
+    lastAutoGain_ = gain;
+    autoGainDb_ = gainDb;
+    lookaheadHead_ = (lookaheadHead_ + 1) % AutoGain::kLookaheadFrames;
+    encodePcm(pcm);
+}
+
+void Recorder::flushLookahead() {
+    while (autoGain_.pending() > 0) {
+        writeOldestLookahead();
+    }
+}
+
+void Recorder::encodePcm(const int16_t* pcm) {
+    if (!encoder_.isOpen() || writeError_) {
+        return;
+    }
+    int length = 0;
+    const uint8_t* mp3 = encoder_.encodeFrame(pcm, &length);
+    writeEncoded(mp3, length);
 }
 
 void Recorder::writeEncoded(const uint8_t* data, size_t length) {

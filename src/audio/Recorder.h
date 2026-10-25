@@ -11,6 +11,7 @@
 #include <atomic>
 
 #include "audio/AudioConfig.h"
+#include "audio/AutoGain.h"
 #include "audio/DcBlocker.h"
 #include "audio/Mp3Encoder.h"
 #include "audio/PreRollBuffer.h"
@@ -33,6 +34,7 @@ struct RecorderConfig {
     uint8_t sensitivity = 3;
     uint16_t holdMs = 1500;
     float noiseFloorDbfs = -60.0f;  // start value of the adaptive noise floor
+    bool autoLevel = true;          // AutoGain on the written audio (taken at start())
 };
 
 // Result of the last finished recording.
@@ -49,8 +51,9 @@ struct RecordingSummary {
 //  - capture task (core 1): the only user of M5.Mic. It keeps two buffers queued in the
 //    microphone driver and processes the third, so capture is gapless and nothing ever waits
 //    on another task. Per 36 ms frame: DC blocker -> gain + limiter -> level -> voice
-//    detector -> pre-roll / writer queue.
-//  - writer task (core 0): encodes the queued frames to MP3 and writes 4 KB blocks to the card.
+//    detector -> pre-roll / writer queue (each frame travels with its FrameInfo).
+//  - writer task (core 0): Auto level (AutoGain, 288 ms lookahead: gain ramp + limiter), then
+//    encodes the frames to MP3 and writes 4 KB blocks to the card.
 //
 // The UI never blocks: start() opens the file, stop() only asks for the end; the capture
 // task hands a Close to the writer, which finishes the file and returns to Idle.
@@ -88,6 +91,9 @@ public:
     VoiceState voiceState() const { return voice_.load(); }
     float noiseFloorDbfs() const { return noise_.load(); }
     float triggerDbfs() const { return trigger_.load(); }
+    // Auto level of the current recording: on, and the gain of the last written frame (dB).
+    bool autoLevelActive() const { return autoLevelSession_.load(); }
+    float autoGainDb() const { return autoGainDb_.load(); }
 
     // Current recording.
     uint32_t elapsedMs() const { return framesSeen_.load() * kFrameMs; }
@@ -115,6 +121,7 @@ private:
 
     struct WriterMessage {
         WriterOp op;
+        FrameInfo info;
         int16_t pcm[kSamplesPerFrame];
     };
 
@@ -129,11 +136,15 @@ private:
     void stopMic();
     void applyConfig();
     void processFrame(int16_t* frame);
-    void handleRecording(const int16_t* frame, const VoiceDecision& decision);
-    void sendFrame(const int16_t* frame);
+    void handleRecording(const int16_t* frame, const VoiceDecision& decision, const FrameInfo& info);
+    void sendFrame(const int16_t* frame, const FrameInfo& info);
     void sendControl(WriterOp op);
     void closeSession();
 
+    void writeFrame(const int16_t* pcm, const FrameInfo& info);
+    void writeOldestLookahead();
+    void flushLookahead();
+    void encodePcm(const int16_t* pcm);
     void writeEncoded(const uint8_t* data, size_t length);
     void writeStaging(bool all);
     void finishFile();
@@ -158,6 +169,7 @@ private:
     std::atomic<uint8_t> sensitivity_{3};
     std::atomic<uint16_t> holdMs_{1500};
     std::atomic<float> startNoise_{-60.0f};
+    std::atomic<bool> autoLevel_{true};
     std::atomic<bool> configChanged_{true};
     std::atomic<bool> noiseRestart_{false};
 
@@ -172,6 +184,8 @@ private:
     std::atomic<uint32_t> framesWritten_{0};
     std::atomic<uint32_t> droppedFrames_{0};
     std::atomic<uint32_t> bytesWritten_{0};
+    std::atomic<bool> autoLevelSession_{false};
+    std::atomic<float> autoGainDb_{0.0f};
 
     // Capture task only.
     int16_t buffers_[3][kSamplesPerFrame] = {};
@@ -198,8 +212,12 @@ private:
     Mp3Encoder encoder_;
     RecordingSummary summary_;
 
-    // Writer task only.
+    // Writer task only (prepared by start() while the writer is idle).
     WriterMessage incoming_;
+    AutoGain autoGain_;
+    int16_t lookahead_[AutoGain::kLookaheadFrames][kSamplesPerFrame] = {};
+    size_t lookaheadHead_ = 0;  // oldest frame, in step with the AutoGain window
+    float lastAutoGain_ = 1.0f;
     uint8_t staging_[kSdWriteBlock * 2] = {};
     size_t stagingCount_ = 0;
     uint32_t lastSyncAt_ = 0;

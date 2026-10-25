@@ -81,6 +81,12 @@ std::unique_ptr<ListScreen> makeSettingsScreen(App& app) {
                          changed();
                      },
                      str::kSetGainText});
+    items.push_back({str::kSetAutoLevel, [&s]() { return onOff(s.autoLevel); }, nullptr,
+                     [&s, changed](int) {
+                         s.autoLevel = !s.autoLevel;
+                         changed();
+                     },
+                     str::kSetAutoLevelText});
     items.push_back({str::kSetQuality, [&s]() { return String(s.bitrateKbps) + " kbit/s"; }, nullptr,
                      [&s, changed](int delta) {
                          s.bitrateKbps = cycle(kBitrates, s.bitrateKbps, delta);

@@ -16,6 +16,7 @@ struct Settings {
     uint8_t sensitivity = 3;  // 1..5
     uint16_t holdMs = 1500;
     int8_t micGainDb = 12;    // software gain, 0..30 dB
+    bool autoLevel = true;    // AutoGain: quiet speech raised to a clear level in the file
     uint8_t bitrateKbps = kDefaultBitrateKbps;
 
     // Calibration (Mic check). The noise floor was measured with `calibratedGainDb`.

@@ -30,6 +30,7 @@ void Settings::load(bool cardputerAdv) {
     sensitivity = clampValue<uint8_t>(prefs.getUChar("sens", sensitivity), kSensitivityMin, kSensitivityMax);
     holdMs = clampValue<uint16_t>(prefs.getUShort("hold", holdMs), kHangoverMinMs, kHangoverMaxMs);
     micGainDb = clampValue<int8_t>(prefs.getChar("gain", defaultGain), kMicGainMinDb, kMicGainMaxDb);
+    autoLevel = prefs.getBool("agc", autoLevel);
     bitrateKbps = prefs.getUChar("kbps", bitrateKbps);
     if (std::find(std::begin(kBitrates), std::end(kBitrates), bitrateKbps) == std::end(kBitrates)) {
         bitrateKbps = kDefaultBitrateKbps;
@@ -51,6 +52,7 @@ void Settings::save() const {
     prefs.putUChar("sens", sensitivity);
     prefs.putUShort("hold", holdMs);
     prefs.putChar("gain", micGainDb);
+    prefs.putBool("agc", autoLevel);
     prefs.putUChar("kbps", bitrateKbps);
     prefs.putBool("cal", calibrated);
     prefs.putFloat("noise", noiseFloorDbfs);
@@ -76,6 +78,7 @@ RecorderConfig Settings::recorderConfig() const {
     config.sensitivity = sensitivity;
     config.holdMs = holdMs;
     config.noiseFloorDbfs = expectedNoiseFloor();
+    config.autoLevel = autoLevel;
     return config;
 }
 

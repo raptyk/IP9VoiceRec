@@ -22,6 +22,13 @@ rysowane klawisze, podpowiedzi w stopce i opis każdej opcji.
 * **Mic check i kalibracja** (2 kroki, ok. 8 s): 3 s ciszy (szum tła i jego zmienność), potem 4,5 s mowy
   (poziom głosu). Kalibracja ustawia **wzmocnienie** tak, by mowa trafiała w ok. -20 dBFS, i dobiera **czułość**
   do odstępu głosu od szumu. Na żywo: miernik z zaznaczonym poziomem szumu i progiem wyzwalania.
+* **Auto level – automatyczny poziom nagrania** (domyślnie włączony, *Settings → Auto level*): ciche lub dalekie
+  głosy są podczas zapisu podnoszone do wyraźnego poziomu (mowa ok. -19 dBFS), głośne – ściszane, zanim trafią
+  w limiter. Działa z podglądem 0,3 s „w przód”, więc wzmocnienie jest gotowe już na pierwszą sylabę, a nagły
+  krzyk czy stuknięcie nie są przesterowane. Mierzy tylko ramki z głosem: cisza, pauzy i szum tła nie podnoszą
+  wzmocnienia (brak „pompowania”), a w głośnym pomieszczeniu szum nie jest podbijany ponad -42 dBFS.
+  Zakres -12…+30 dB; bieżąca wartość widoczna podczas nagrywania („auto +18”). Wyuczony poziom przechodzi
+  na następne nagranie.
 * **Wzmocnienie mikrofonu**: Cardputer – mikrofon PDM ×8 + programowe 0…30 dB; Cardputer ADV – kodek ES8311
   z analogowym PGA +21 dB (M5Unified zostawia go na 0 dB, stąd wcześniejszy zbyt cichy mikrofon) + programowe
   0…30 dB. Głośne fragmenty są łagodnie limitowane zamiast twardo obcinane.
@@ -99,6 +106,17 @@ pio run
 
 Praca nad IP9Kit razem z dyktafonem: sklonuj IP9Kit obok tego katalogu (`../IP9Kit`) i skopiuj
 `ip9kit-local.ini.example` do `ip9kit-local.ini`.
+
+### Symulacja Auto level
+
+`tools/autogain_sim.cpp` przepuszcza syntetyczną mowę, szum i stuknięcia przez ten sam kod co firmware
+(`Dsp`, `VoiceDetector`, `AutoGain`) i sprawdza 14 scenariuszy (cicha / głośna mowa, szept, głośne pomieszczenie,
+krzyk, stuknięcia, pauzy, wentylator, zmiana wzmocnienia, kolejne nagranie). Dowolny kompilator C++17:
+
+```bash
+g++ -std=c++17 -O2 -Isrc tools/autogain_sim.cpp src/audio/AutoGain.cpp src/audio/Dsp.cpp src/audio/VoiceDetector.cpp -o autogain_sim
+./autogain_sim
+```
 
 ## Naprawa nagrań z wersji 1.0.0 i 1.1.0
 
