@@ -91,3 +91,4 @@ Część marki IP9 (https://cardputer.ip9.pl), repozytorium `IP9VoiceRec`.
 - Ekrany: `HomeScreen` (karuzela), `RecordScreen`, `LibraryScreen` + `PlayerScreen`, `MicCheckScreen`,
   ustawienia (`makeSettingsScreen` → `ListScreen`), `HelpScreen`, `ConfirmScreen` / `InfoScreen`.
 - Klawisze jak w innych aplikacjach IP9: `;` `.` `,` `/` strzałki, `esc` to klawisz `` ` ``, `del` = wstecz, `tab` = pomoc, `G0` = enter.
+- `tools/make_screenshots.py` renderuje makiety ekranów (Record, Mic check, Player) w 2x do `docs/images/` na potrzeby `README.md`.

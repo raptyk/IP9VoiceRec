@@ -1,128 +1,129 @@
 # IP9 VoiceRec
 
-Dyktafon cyfrowy dla **M5Stack Cardputer** i **Cardputer ADV** (ESP32-S3): nagrywa do plików **MP3** na kartę SD,
-z **aktywacją głosem**, która pomija ciszę, kalibracją mikrofonu i wbudowanym odtwarzaczem.
-Jedna z aplikacji IP9 dla Cardputera – **https://cardputer.ip9.pl**. Interfejs wspólny z innymi aplikacjami IP9
-(m.in. [IP9 LG Remote](https://github.com/raptyk/IP9LGRemote)): karuzela kart na starcie, kolorowe ekrany sekcji,
-rysowane klawisze, podpowiedzi w stopce i opis każdej opcji.
+Digital voice recorder for the **M5Stack Cardputer** and **Cardputer ADV** (ESP32-S3): records directly to **MP3** files on a microSD card, featuring **room-adaptive voice activation** that skips silence, built-in microphone calibration, and an integrated audio player.
+
+Part of the IP9 Cardputer suite – **https://cardputer.ip9.pl**. Shares the unified interface of IP9 apps (including [IP9 LG Remote](https://github.com/raptyk/IP9LGRemote)): carousel launcher cards, color-coded section bands, drawn key caps, footer hints, and detailed setting descriptions.
+
+Author: Patryk Strzelecki <patryk@strzelecki.info> · License: MIT · https://github.com/raptyk/IP9VoiceRec
 
 ---
 
-## Funkcje
+## Screens
 
-* **MP3 w locie** (`libshine`): 16 kHz, mono, 32 / 48 / 64 kbit/s. Przy 48 kbit/s ok. 21 MB na godzinę mowy.
-  Pliki `rec_0001.mp3`, `rec_0002.mp3`… w katalogu `/recordings` – otwierają się na każdym komputerze i telefonie.
-* **Aktywacja głosem, która dopasowuje się do pomieszczenia**:
-  - próg nie jest stałą wartością w dBFS, tylko marginesem nad **na bieżąco śledzonym poziomem szumu**
-    (średnia tła i jego zmienność); ta sama czułość działa w cichej sypialni i w biurze,
-  - start po dwóch głośnych ramkach z rzędu (72 ms) – kliknięcia klawiszy i stuknięcia nie uruchamiają nagrania,
-  - **pre-roll 360 ms** – pierwsza sylaba nie jest ucinana,
-  - **podtrzymanie** (domyślnie 1,5 s) – krótkie pauzy między słowami nie dzielą nagrania,
-  - włączony nagle wentylator podtrzymuje nagranie najwyżej kilka sekund, potem detektor uznaje go za tło.
-* **Mic check i kalibracja** (2 kroki, ok. 8 s): 3 s ciszy (szum tła i jego zmienność), potem 4,5 s mowy
-  (poziom głosu). Kalibracja ustawia **wzmocnienie** tak, by mowa trafiała w ok. -20 dBFS, i dobiera **czułość**
-  do odstępu głosu od szumu. Na żywo: miernik z zaznaczonym poziomem szumu i progiem wyzwalania.
-* **Auto level – automatyczny poziom nagrania** (domyślnie włączony, *Settings → Auto level*): ciche lub dalekie
-  głosy są podczas zapisu podnoszone do wyraźnego poziomu (mowa ok. -19 dBFS), głośne – ściszane, zanim trafią
-  w limiter. Działa z podglądem 0,3 s „w przód”, więc wzmocnienie jest gotowe już na pierwszą sylabę, a nagły
-  krzyk czy stuknięcie nie są przesterowane. Mierzy tylko ramki z głosem: cisza, pauzy i szum tła nie podnoszą
-  wzmocnienia (brak „pompowania”), a w głośnym pomieszczeniu szum nie jest podbijany ponad -42 dBFS.
-  Zakres -12…+30 dB; bieżąca wartość widoczna podczas nagrywania („auto +18”). Wyuczony poziom przechodzi
-  na następne nagranie.
-* **Wzmocnienie mikrofonu**: Cardputer – mikrofon PDM ×8 + programowe 0…30 dB; Cardputer ADV – kodek ES8311
-  z analogowym PGA +21 dB (M5Unified zostawia go na 0 dB, stąd wcześniejszy zbyt cichy mikrofon) + programowe
-  0…30 dB. Głośne fragmenty są łagodnie limitowane zamiast twardo obcinane.
-* **Odtwarzacz** (Helix MP3): pauza, przewijanie ±10 s, poprzedni/następny plik, głośność, usuwanie.
-* **Wskaźnik LED**: ciągły czerwony = nagrywany głos, pulsujący czerwony = nasłuch, bursztynowy = pauza,
-  pulsujący biały = zapisywanie, dwa zielone mignięcia = zapisano, dwa czerwone = błąd.
-* **Ekran gaśnie podczas nagrywania** (ustawialne), nagrywanie trwa dalej; klawisz budzący ekran nie jest
-  przekazywany dalej, więc nie zatrzyma przypadkiem nagrania.
+| | |
+|---|---|
+| ![Recording screen](docs/images/record.png) | ![Mic check & calibration](docs/images/mic-check.png) |
+| **Recording** – live voice detector, Auto level gain & skipped silence | **Mic check** – room noise baseline & 2-step voice calibration |
+| ![Audio player](docs/images/player.png) | |
+| **Audio player** – playback with progress bar, ±10 s seek & volume | |
+
+Screens are rendered at 2× from the firmware layout (`python tools/make_screenshots.py`); on the device the fonts are the M5GFX bitmap fonts.
 
 ---
 
-## Sterowanie
+## Features
 
-### Ekran startowy
+* **On-the-fly MP3 encoding** (`libshine`): 16 kHz, mono, 32 / 48 / 64 kbit/s. At 48 kbit/s, approximately 21 MB per hour of speech. Files are saved as `rec_0001.mp3`, `rec_0002.mp3`… in `/recordings` – playable on any computer or mobile device.
+* **Room-adaptive voice activation (VAD)**:
+  - The activation threshold is not a static dBFS value, but a dynamic margin above the **continuously tracked background noise floor** (background average and variance); the same sensitivity setting works reliably in a quiet bedroom and a busy office,
+  - Starts after two consecutive loud frames (72 ms) – key clicks and accidental bumps won't trigger recording,
+  - **360 ms pre-roll** – the very first syllable is never cut off,
+  - **Hold time** (default 1.5 s) – natural pauses between words do not split the recording,
+  - A suddenly started fan holds recording for a few seconds at most before the detector adapts and treats it as background noise.
+* **Mic check and calibration** (2 steps, ~8 s): 3 s of quiet (measures background noise floor and fluctuation), followed by 4.5 s of speech (measures voice level). Calibration automatically sets **microphone gain** so speech targets ~-20 dBFS, and picks optimal **sensitivity** based on measured SNR. Live view includes a level meter with marked noise floor and trigger levels.
+* **Auto level – automatic recording level** (enabled by default, *Settings → Auto level*): quiet or distant voices are boosted during recording to a clear target level (speech ~-19 dBFS), while loud voices are smoothly attenuated before hitting the limiter. Works with a 0.3 s look-ahead window, so gain is already adjusted for the very first syllable, preventing clipping on sudden shouts or taps. Measures speech frames only: silence, pauses, and background noise never cause gain pumping, and noise in loud environments is capped at -42 dBFS. Dynamic range of -12…+30 dB; current gain is visible during recording (e.g. `auto +12`). Learned gain carries over to the next recording.
+* **Microphone gain**: Cardputer – PDM microphone ×8 + software gain 0…30 dB; Cardputer ADV – ES8311 codec with analog PGA +21 dB (M5Unified leaves it at 0 dB, which caused previous low volume) + software gain 0…30 dB. Loud transients are softly limited instead of hard-clipped.
+* **Audio player** (Helix MP3): pause, ±10 s seek, previous/next track, volume control, file deletion with confirmation.
+* **Status LED indicator**: steady red = recording speech, pulsing red = listening for voice, steady amber = paused, pulsing white = saving file, two green blinks = saved successfully, two red blinks = error.
+* **Display sleep during recording** (configurable timeout): recording continues in the background; the wake-up keypress is intercepted so it never accidentally stops or interrupts the recording.
 
-| Klawisz | Akcja |
+---
+
+## Controls
+
+### Home screen
+
+| Key | Action |
 | :--- | :--- |
-| `,` `/` (oraz `;` `.`) | Wybór karty: Record, Recordings, Mic check, Settings, Help |
-| `enter` / `G0` | Otwarcie karty (Record od razu zaczyna nagrywać) |
-| `r` | Nagrywanie od razu (także z listy nagrań) |
-| `1`–`5` | Otwarcie karty o danym numerze |
-| `tab` | Pomoc |
+| `,` `/` (and `;` `.`) | Select card: Record, Recordings, Mic check, Settings, Help |
+| `enter` / `G0` | Open card (Record starts recording immediately) |
+| `r` | Start recording immediately (also works from the recordings list) |
+| `1`–`5` | Jump directly to card by number |
+| `tab` | Help |
 
-### Nagrywanie
+### Recording
 
-| Klawisz | Akcja |
+| Key | Action |
 | :--- | :--- |
-| `enter` / `G0` / `esc` / `del` | Zatrzymanie i zapis |
-| `space` | Pauza / wznowienie |
-| `v` | Aktywacja głosem wł./wył. (na żywo) |
-| `[` `]` | Czułość 1–5 |
-| `-` `=` | Wzmocnienie mikrofonu (krok 3 dB) |
+| `enter` / `G0` / `esc` / `del` | Stop and save recording |
+| `space` | Pause / resume |
+| `v` | Toggle voice activation on/off (on the fly) |
+| `[` `]` | Adjust sensitivity (1–5) |
+| `-` `=` | Adjust microphone gain (3 dB steps) |
 
-### Nagrania i odtwarzacz
+### Recordings & Player
 
-| Klawisz | Akcja |
+| Key | Action |
 | :--- | :--- |
-| `;` `.` | Poprzedni / następny plik |
-| `enter` / `space` | Odtwarzanie / pauza |
-| `,` `/` | Przewijanie -10 s / +10 s |
-| `-` `=` | Głośność |
-| `d` | Usunięcie pliku (z potwierdzeniem) |
-| `esc` / `del` | Powrót |
+| `;` `.` | Previous / next recording |
+| `enter` / `space` | Play / pause |
+| `,` `/` | Seek -10 s / +10 s |
+| `-` `=` | Adjust volume |
+| `d` | Delete recording (with confirmation) |
+| `esc` / `del` | Back |
 
 ### Mic check
 
-| Klawisz | Akcja |
+| Key | Action |
 | :--- | :--- |
-| `enter` / `c` | Kalibracja (cisza, potem mowa) |
-| `[` `]` / `-` `=` | Czułość / wzmocnienie |
-| `v` | Aktywacja głosem wł./wył. |
+| `enter` / `c` | Start 2-step calibration (quiet room, then speak) |
+| `[` `]` / `-` `=` | Adjust sensitivity / microphone gain |
+| `v` | Toggle voice activation on/off |
+| `s` | Speaker test (plays tone sequence) |
 
 ---
 
-## Gotowe pliki (`release/`)
+## Pre-built binaries (`release/`)
 
-Kompilacja tworzy w `release/`:
+Building the project generates in `release/`:
 
-1. `IP9VoiceRec-<wersja>.bin` – sama aplikacja, do uruchomienia z karty SD przez **M5Launcher**,
-2. `IP9VoiceRec-<wersja>-full.bin` – pełny obraz (bootloader + partycje + aplikacja) pod adres `0x0`.
+1. `IP9VoiceRec-<version>.bin` – application image, ready to run from SD card via **M5Launcher**,
+2. `IP9VoiceRec-<version>-full.bin` – complete flash image (bootloader + partition table + application) for flashing at offset `0x0`.
 
 ```bash
 esptool.py --chip esp32s3 write_flash 0x0 release/IP9VoiceRec-1.2.0-full.bin
 ```
 
-## Kompilacja
+## Building
 
-Wymaga [PlatformIO](https://platformio.org/). Wspólny rdzeń aplikacji IP9, [IP9Kit](https://github.com/raptyk/IP9Kit)
-(powłoka aplikacji, menu, karuzela, pomoc, okienka, klawiatura, dioda LED, bateria), PlatformIO pobiera w wersji
-przypiętej w `platformio.ini`.
+Requires [PlatformIO](https://platformio.org/). The common IP9 application core, [IP9Kit](https://github.com/raptyk/IP9Kit) (application shell, menus, carousel, help screens, dialogs, keyboard input, LED indicator, battery), is automatically downloaded by PlatformIO at the version pinned in `platformio.ini`.
 
 ```bash
 pio run
 ```
 
-Praca nad IP9Kit razem z dyktafonem: sklonuj IP9Kit obok tego katalogu (`../IP9Kit`) i skopiuj
-`ip9kit-local.ini.example` do `ip9kit-local.ini`.
+To develop IP9Kit concurrently with VoiceRec, clone IP9Kit alongside this repository (`../IP9Kit`) and copy `ip9kit-local.ini.example` to `ip9kit-local.ini`.
 
-### Symulacja Auto level
+### Auto level simulation
 
-`tools/autogain_sim.cpp` przepuszcza syntetyczną mowę, szum i stuknięcia przez ten sam kod co firmware
-(`Dsp`, `VoiceDetector`, `AutoGain`) i sprawdza 14 scenariuszy (cicha / głośna mowa, szept, głośne pomieszczenie,
-krzyk, stuknięcia, pauzy, wentylator, zmiana wzmocnienia, kolejne nagranie). Dowolny kompilator C++17:
+`tools/autogain_sim.cpp` runs synthetic speech, noise, and clicks through the identical DSP pipeline as the firmware (`Dsp`, `VoiceDetector`, `AutoGain`) and verifies 14 test scenarios (quiet/loud speech, whispers, noisy rooms, shouts, clicks, pauses, fan noise, gain transitions, successive recordings). Compile with any C++17 compiler:
 
 ```bash
 g++ -std=c++17 -O2 -Isrc tools/autogain_sim.cpp src/audio/AutoGain.cpp src/audio/Dsp.cpp src/audio/VoiceDetector.cpp -o autogain_sim
 ./autogain_sim
 ```
 
-## Naprawa nagrań z wersji 1.0.0 i 1.1.0
+### Screenshot generation
 
-Te wersje zapisywały w każdym nagłówku ramki MP3 bit „padding”, choć ramki go nie miały, więc żaden odtwarzacz
-nie umiał ich odczytać. Dźwięk w plikach jest cały; skrypt czyści tylko ten bit (tworzy `*_fixed.mp3`,
-z `--in-place` nadpisuje plik):
+Render pixel-accurate 2× preview images of the UI screens for the documentation:
+
+```bash
+python tools/make_screenshots.py
+```
+
+## Repairing recordings from v1.0.0 and v1.1.0
+
+Early firmware versions (1.0.0 and 1.1.0) set the MP3 "padding" header bit on every frame even when frames were not padded, causing common audio players to reject them. The audio data itself is completely intact; the repair script strips this incorrect bit (creates `*_fixed.mp3`, or use `--in-place` to overwrite):
 
 ```bash
 python tools/repair_mp3.py rec_0001.mp3
@@ -130,7 +131,7 @@ python tools/repair_mp3.py rec_0001.mp3
 
 ---
 
-## Licencja
+## License
 
 MIT. Copyright (c) 2026 Patryk Strzelecki <patryk@strzelecki.info>.
-Repozytorium: https://github.com/raptyk/IP9VoiceRec · więcej aplikacji IP9: https://cardputer.ip9.pl
+Repository: https://github.com/raptyk/IP9VoiceRec · More IP9 apps: https://cardputer.ip9.pl
