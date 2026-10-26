@@ -135,8 +135,13 @@ constexpr const char* kCalSnrLow = "Only %d dB above the noise: get closer.";
 constexpr const char* kRoomQuiet = "Quiet room";
 constexpr const char* kRoomNormal = "Normal room";
 constexpr const char* kRoomNoisy = "Noisy room";
-constexpr const char* kFooterMicCheck = "v voice act.  tab help  esc back";
+constexpr const char* kFooterMicCheck = "s speaker  v voice  tab help  esc back";
 constexpr const char* kFooterCalibrating = "esc cancel";
+constexpr const char* kBandSpeakerTest = "SPEAKER TEST";
+constexpr const char* kSpeakerTestTitle = "Listen to the speaker";
+constexpr const char* kSpeakerTestText = "Three rising tones at volume %u of 10 (Settings).";
+constexpr const char* kSpeakerTestFailed = "The speaker did not start";
+constexpr const char* kFooterSpeakerTest = "esc stop";
 
 // Settings
 constexpr const char* kSettingsTitle = "Settings";

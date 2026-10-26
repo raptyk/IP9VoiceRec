@@ -15,6 +15,7 @@ public:
     static constexpr int kPageGeneral = 0;
     static constexpr int kPageRecording = 1;
     static constexpr int kPagePlayback = 2;
+    static constexpr int kPageMicCheck = 3;
 };
 
 }  // namespace voicerec

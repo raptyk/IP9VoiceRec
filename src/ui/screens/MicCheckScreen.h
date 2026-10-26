@@ -12,6 +12,7 @@ namespace voicerec {
 //   1. 3 s of quiet  -> noise floor and how much the background fluctuates,
 //   2. 4.5 s of speech -> voice level: sets the gain so speech lands at about -20 dBFS,
 //      and picks the sensitivity from the measured voice-to-noise distance.
+// `s` plays the speaker test (the microphone pauses meanwhile: both share pins).
 class MicCheckScreen : public Screen {
 public:
     using Screen::Screen;
@@ -26,21 +27,26 @@ public:
     uint16_t chipColour() const override { return theme::kMicCheck; }
 
 private:
-    enum class Phase : uint8_t { Live, Quiet, Speech };
+    enum class Phase : uint8_t { Live, Quiet, Speech, SpeakerTest };
 
     void startCalibration();
     void finishCalibration();
     void changeSetting(char key);
+    void startSpeakerTest();
+    void endSpeakerTest();
+    void tickSpeakerTest();
 
     void drawBand(M5Canvas& canvas, int top);
     void drawLive(M5Canvas& canvas, int top, int height);
     void drawCalibration(M5Canvas& canvas, int top, int height);
+    void drawSpeakerTest(M5Canvas& canvas, int top, int height);
     void drawMeter(M5Canvas& canvas, int y, int height, bool markers);
     void drawKeyRow(M5Canvas& canvas, int top, int height);
 
     Phase phase_ = Phase::Live;
     bool captureStarted_ = false;
     uint32_t phaseStartedAt_ = 0;
+    bool speakerTestStarted_ = false;  // the player has picked the test up
     bool settingsChanged_ = false;
     bool failureShown_ = false;
     calibration::NoiseResult noise_{};

@@ -22,6 +22,8 @@ constexpr float kPeakFallDbPerFrame = 1.5f;
 constexpr float kGoodSnrDb = 20.0f;
 constexpr float kOkSnrDb = 12.0f;
 constexpr uint32_t kQuietDelayMs = 600;  // the click of the enter key must not count as room noise
+// The player waits up to 600 ms for the microphone to let go of the pins, then sets the speaker up.
+constexpr uint32_t kSpeakerTestStartMs = 2500;
 
 const char* roomName(calibration::RoomKind room) {
     switch (room) {
@@ -33,6 +35,9 @@ const char* roomName(calibration::RoomKind room) {
 }  // namespace
 
 MicCheckScreen::~MicCheckScreen() {
+    if (phase_ == Phase::SpeakerTest) {
+        Player::instance().stop();
+    }
     Recorder::instance().stopMonitor();
     if (settingsChanged_) {
         app_.saveSettings();
@@ -47,6 +52,11 @@ void MicCheckScreen::onEnter() {
 void MicCheckScreen::onKey(const KeyEvent& event) {
     if (phase_ != Phase::Live) {
         if (!event.repeat && (event.code == keycode::kEsc || event.code == keycode::kBackspace)) {
+            if (phase_ == Phase::SpeakerTest) {
+                Player::instance().stop();
+                endSpeakerTest();
+                return;
+            }
             phase_ = Phase::Live;
             Recorder::instance().captureLevels(0);
         }
@@ -60,6 +70,11 @@ void MicCheckScreen::onKey(const KeyEvent& event) {
                 startCalibration();
             }
             break;
+        case 's':
+            if (!event.repeat) {
+                startSpeakerTest();
+            }
+            break;
         case '[':
         case ']':
         case '-':
@@ -71,7 +86,7 @@ void MicCheckScreen::onKey(const KeyEvent& event) {
             break;
         case keycode::kTab:
             if (!event.repeat) {
-                app_.push(std::make_unique<HelpScreen>(app_, HelpScreen::kPageRecording));
+                app_.push(std::make_unique<HelpScreen>(app_, HelpScreen::kPageMicCheck));
             }
             break;
         case keycode::kEsc:
@@ -111,7 +126,42 @@ void MicCheckScreen::startCalibration() {
     phaseStartedAt_ = millis();
 }
 
+void MicCheckScreen::startSpeakerTest() {
+    phase_ = Phase::SpeakerTest;
+    speakerTestStarted_ = false;
+    phaseStartedAt_ = millis();
+    Recorder::instance().stopMonitor();  // the speaker needs the pins the microphone uses
+    Player::instance().setVolume(app_.settings().speakerVolume());
+    Player::instance().testSpeaker();
+}
+
+void MicCheckScreen::endSpeakerTest() {
+    phase_ = Phase::Live;
+    Recorder::instance().startMonitor();
+}
+
+void MicCheckScreen::tickSpeakerTest() {
+    const PlayerState state = Player::instance().state();
+    if (state == PlayerState::Playing || state == PlayerState::Paused) {
+        speakerTestStarted_ = true;
+        return;
+    }
+    const bool failed = state == PlayerState::Error;
+    if (!speakerTestStarted_ && !failed && millis() - phaseStartedAt_ < kSpeakerTestStartMs) {
+        return;  // not picked up yet
+    }
+    if (failed || !speakerTestStarted_) {
+        app_.warn(str::kSpeakerTestFailed);
+    }
+    endSpeakerTest();
+}
+
 void MicCheckScreen::tick() {
+    if (phase_ == Phase::SpeakerTest) {
+        tickSpeakerTest();
+        app_.invalidate();
+        return;
+    }
     Recorder& recorder = Recorder::instance();
     if (recorder.micFailed() && !failureShown_) {
         failureShown_ = true;
@@ -179,7 +229,11 @@ void MicCheckScreen::tick() {
 }
 
 const char* MicCheckScreen::footer() const {
-    return phase_ == Phase::Live ? str::kFooterMicCheck : str::kFooterCalibrating;
+    switch (phase_) {
+        case Phase::Live: return str::kFooterMicCheck;
+        case Phase::SpeakerTest: return str::kFooterSpeakerTest;
+        default: return str::kFooterCalibrating;
+    }
 }
 
 void MicCheckScreen::draw(M5Canvas& canvas, int top, int height) {
@@ -189,6 +243,8 @@ void MicCheckScreen::draw(M5Canvas& canvas, int top, int height) {
     if (phase_ == Phase::Live) {
         drawLive(canvas, middleTop, height - kBandHeight - kKeyRowHeight);
         drawKeyRow(canvas, top + height - kKeyRowHeight, kKeyRowHeight);
+    } else if (phase_ == Phase::SpeakerTest) {
+        drawSpeakerTest(canvas, middleTop, height - kBandHeight);
     } else {
         drawCalibration(canvas, middleTop, height - kBandHeight);
     }
@@ -196,9 +252,10 @@ void MicCheckScreen::draw(M5Canvas& canvas, int top, int height) {
 
 void MicCheckScreen::drawBand(M5Canvas& canvas, int top) {
     using namespace theme;
-    const char* title = phase_ == Phase::Quiet    ? str::kBandCalQuiet
-                        : phase_ == Phase::Speech ? str::kBandCalSpeak
-                                                  : str::kBandMicCheck;
+    const char* title = phase_ == Phase::Quiet         ? str::kBandCalQuiet
+                        : phase_ == Phase::Speech      ? str::kBandCalSpeak
+                        : phase_ == Phase::SpeakerTest ? str::kBandSpeakerTest
+                                                       : str::kBandMicCheck;
     canvas.fillRect(0, top, kScreenWidth, kBandHeight, kMicCheck);
     const int centerY = top + kBandHeight / 2;
     icons::draw(canvas, icons::Icon::Levels, 16, centerY, kText, 0.42f, kMicCheck);
@@ -318,6 +375,29 @@ void MicCheckScreen::drawCalibration(M5Canvas& canvas, int top, int height) {
     painter::drawProgress(canvas, kPadding + 4, top + height - 26, kScreenWidth - 2 * kPadding - 8, progress,
                           kMicCheck);
     drawMeter(canvas, top + height - 14, 8, false);
+}
+
+void MicCheckScreen::drawSpeakerTest(M5Canvas& canvas, int top, int height) {
+    using namespace theme;
+    const Player& player = Player::instance();
+    char body[64];
+    snprintf(body, sizeof(body), str::kSpeakerTestText, app_.settings().volume);
+
+    canvas.setTextSize(1);
+    canvas.setFont(&fonts::FreeSansBold9pt7b);
+    canvas.setTextColor(kText);
+    canvas.setTextDatum(top_left);
+    painter::drawClippedText(canvas, str::kSpeakerTestTitle, kPadding + 2, top + 5, kScreenWidth - 2 * kPadding);
+    canvas.setFont(&fonts::Font2);
+    canvas.setTextColor(kTextMuted);
+    painter::drawWrappedText(canvas, body, kPadding + 2, top + 25, kScreenWidth - 2 * kPadding - 4, 14, 2);
+
+    const uint32_t duration = player.durationMs();
+    const float progress = speakerTestStarted_ && duration > 0
+                               ? fminf(1.0f, static_cast<float>(player.positionMs()) / duration)
+                               : 0.0f;
+    painter::drawProgress(canvas, kPadding + 4, top + height - 18, kScreenWidth - 2 * kPadding - 8, progress,
+                          kMicCheck);
 }
 
 void MicCheckScreen::drawKeyRow(M5Canvas& canvas, int top, int height) {

@@ -11,6 +11,7 @@
 
 #include <atomic>
 
+#include "audio/AudioConfig.h"
 #include "audio/Mp3Info.h"
 
 namespace voicerec {
@@ -27,6 +28,8 @@ public:
     void begin();
 
     void play(const String& path, uint32_t startMs = 0);
+    // Three rising tones through the same path as a recording (16 kHz PCM to the speaker).
+    void testSpeaker();
     void togglePause();
     void stop();
     void seekBy(int32_t deltaMs);
@@ -39,7 +42,7 @@ public:
     uint32_t durationMs() const { return durationMs_.load(); }
 
 private:
-    enum class Op : uint8_t { Play, TogglePause, Stop, Seek };
+    enum class Op : uint8_t { Play, TogglePause, Stop, Seek, Test };
 
     struct Command {
         Op op;
@@ -56,8 +59,11 @@ private:
     void loop();
     void handle(const Command& command);
     void open(const char* path, uint32_t startMs);
+    void openTest();
     void seekTo(uint32_t ms);
     void pump();
+    void pumpTest();
+    void finish();
     void output(const MP3FrameInfo& info, const short* pcm, size_t samples);
     void close(PlayerState endState);
     void send(Op op, int32_t value = 0, const char* path = nullptr);
@@ -72,6 +78,9 @@ private:
     std::atomic<uint8_t> volume_{160};
 
     // Player task only.
+    bool testing_ = false;
+    uint32_t testSample_ = 0;
+    int16_t testFrame_[kSamplesPerFrame] = {};
     File file_;
     Mp3Info info_;
     libhelix::MP3DecoderHelix decoder_;

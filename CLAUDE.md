@@ -53,6 +53,11 @@ Część marki IP9 (https://cardputer.ip9.pl), repozytorium `IP9VoiceRec`.
 
 - Cardputer: PDM SPM1423, `magnification = 16` (×8). ADV: ES8311, M5Unified zostawia PGA na 0 dB – `AudioHardware::tuneAdvCodec()`
   ustawia PGA +21 dB (reg 0x14 = 0x17, jak M5Stack StopWatch) po `Mic.begin()`; `magnification = 2` (×1).
+- ADV, głośnik: krótka konfiguracja DAC ES8311 z M5Unified (pisana przed startem I2S, po nagraniu kodek ma wyłączoną
+  maszynę stanów) dawała tylko „pyk”, potem ciszę, a po `Speaker.end()` szum (DAC bez zegara). `AudioHardware::startAdvDac()`
+  po `Speaker.begin()`: 200 ms ciszy na kanale 7 (zegar BCLK), reset kodeka (0x00 = 0x1F) i pełna konfiguracja toru
+  odtwarzania jak w sterowniku Espressif (zegary, wejście I2S 16 bit, DAC, wyjście, odciszenie); `stopAdvDac()` wycisza
+  i wyłącza DAC przed `Speaker.end()`, póki zegar działa. Test głośnika: *Mic check* → `s` (tony przez `Player::output`).
 - Programowe wzmocnienie 0–30 dB (krok 3) z miękkim limiterem od -2,5 dBFS. Domyślnie +12 dB (Cardputer) / +18 dB (ADV).
   Detektor głosu i mierniki widzą sygnał **przed** Auto level – progi aktywacji nie zależą od AGC.
 - Auto level (`AutoGain`, ustawienie `agc` w NVS, domyślnie wł., brane przy `start()`): poziom mowy = obwiednia

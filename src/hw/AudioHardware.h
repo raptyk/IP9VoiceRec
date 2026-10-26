@@ -38,6 +38,8 @@ private:
     bool claim(AudioOwner owner);
     void release(AudioOwner owner);
     void tuneAdvCodec();
+    void startAdvDac();
+    void stopAdvDac();
 
     SemaphoreHandle_t lock_ = nullptr;
     std::atomic<AudioOwner> owner_{AudioOwner::None};

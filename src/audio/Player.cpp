@@ -3,6 +3,7 @@
 #include "Player.h"
 
 #include <M5Cardputer.h>
+#include <math.h>
 #include <string.h>
 
 #include "hw/AudioHardware.h"
@@ -16,6 +17,28 @@ constexpr UBaseType_t kTaskPriority = 4;
 constexpr size_t kQueueDepth = 6;
 constexpr uint8_t kSpeakerChannel = 0;
 constexpr uint32_t kSeekEndMarginMs = 500;
+
+// Speaker test: C5, E5, G5 at -6 dBFS, each with 10 ms fades and a short gap after it.
+constexpr float kTestTonesHz[] = {523.25f, 659.25f, 783.99f};
+constexpr size_t kTestToneCount = sizeof(kTestTonesHz) / sizeof(kTestTonesHz[0]);
+constexpr uint32_t kTestToneSamples = kSampleRate * 350 / 1000;
+constexpr uint32_t kTestGapSamples = kSampleRate * 120 / 1000;
+constexpr uint32_t kTestFadeSamples = kSampleRate * 10 / 1000;
+constexpr uint32_t kTestSamples = (kTestToneSamples + kTestGapSamples) * kTestToneCount;
+constexpr float kTestAmplitude = 16384.0f;
+constexpr float kTwoPi = 6.2831853f;
+
+int16_t testSampleAt(uint32_t n) {
+    const uint32_t tone = n / (kTestToneSamples + kTestGapSamples);
+    const uint32_t pos = n % (kTestToneSamples + kTestGapSamples);
+    if (tone >= kTestToneCount || pos >= kTestToneSamples) {
+        return 0;
+    }
+    const uint32_t edge = pos < kTestToneSamples - pos ? pos : kTestToneSamples - pos;
+    const float fade = edge < kTestFadeSamples ? static_cast<float>(edge) / kTestFadeSamples : 1.0f;
+    const float phase = kTwoPi * kTestTonesHz[tone] * static_cast<float>(pos) / kSampleRate;
+    return static_cast<int16_t>(kTestAmplitude * fade * sinf(phase));
+}
 }  // namespace
 
 Player& Player::instance() {
@@ -47,6 +70,11 @@ void Player::send(Op op, int32_t value, const char* path) {
 void Player::play(const String& path, uint32_t startMs) {
     interrupt_ = true;
     send(Op::Play, static_cast<int32_t>(startMs), path.c_str());
+}
+
+void Player::testSpeaker() {
+    interrupt_ = true;
+    send(Op::Test);
 }
 
 void Player::togglePause() {
@@ -86,7 +114,11 @@ void Player::loop() {
             wait = 0;
         }
         if (state_ == PlayerState::Playing) {
-            pump();
+            if (testing_) {
+                pumpTest();
+            } else {
+                pump();
+            }
         }
     }
 }
@@ -96,6 +128,9 @@ void Player::handle(const Command& command) {
     switch (command.op) {
         case Op::Play:
             open(command.path, static_cast<uint32_t>(command.value));
+            break;
+        case Op::Test:
+            openTest();
             break;
         case Op::TogglePause:
             if (state_ == PlayerState::Playing) {
@@ -142,6 +177,21 @@ void Player::open(const char* path, uint32_t startMs) {
     state_ = PlayerState::Playing;
 }
 
+void Player::openTest() {
+    close(PlayerState::Stopped);
+    durationMs_ = kTestSamples * 1000 / kSampleRate;
+    if (!AudioHardware::instance().startSpeaker(volume_)) {
+        state_ = PlayerState::Error;
+        return;
+    }
+    testing_ = true;
+    testSample_ = 0;
+    baseMs_ = 0;
+    decodedSamples_ = 0;
+    positionMs_ = 0;
+    state_ = PlayerState::Playing;
+}
+
 void Player::seekTo(uint32_t ms) {
     M5.Speaker.stop(kSpeakerChannel);  // drop what is queued from the old position
     file_.seek(info_.offsetForMs(ms));
@@ -158,7 +208,27 @@ void Player::pump() {
         decoder_.write(readBuffer_, length);
         return;
     }
-    // End of file: let the queued audio play out.
+    finish();
+}
+
+void Player::pumpTest() {
+    if (testSample_ >= kTestSamples) {
+        finish();
+        return;
+    }
+    for (size_t i = 0; i < kSamplesPerFrame; ++i) {
+        testFrame_[i] = testSampleAt(testSample_ + i);
+    }
+    testSample_ += kSamplesPerFrame;
+    MP3FrameInfo info{};
+    info.samprate = kSampleRate;
+    info.nChans = 1;
+    info.bitsPerSample = 16;
+    output(info, testFrame_, kSamplesPerFrame);
+}
+
+void Player::finish() {
+    // End of the audio: let what is queued play out.
     while (M5.Speaker.isPlaying(kSpeakerChannel) && !interrupt_) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -197,6 +267,7 @@ void Player::output(const MP3FrameInfo& info, const short* pcm, size_t samples) 
 }
 
 void Player::close(PlayerState endState) {
+    testing_ = false;
     if (file_) {
         file_.close();
     }

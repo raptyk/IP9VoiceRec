@@ -44,6 +44,17 @@ constexpr HelpPage kPages[] = {
       {nullptr, nullptr},
       {nullptr, nullptr},
       {nullptr, nullptr}}},
+    {"Mic check",
+     {{"enter", "Calibrate"},
+      {"s", "Speaker test"},
+      {"v", "Voice act."},
+      {"[ ]", "Sensitivity"},
+      {"- =", "Mic gain"},
+      {"tab", "This help"},
+      {"esc", "Back"},
+      {nullptr, nullptr},
+      {nullptr, nullptr},
+      {nullptr, nullptr}}},
 };
 
 constexpr int kPageCount = sizeof(kPages) / sizeof(kPages[0]);

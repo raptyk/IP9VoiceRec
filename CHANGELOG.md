@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0 – 2026-10-25
+
+- **Speaker test** in *Mic check*: `s` plays three rising tones through the same path as a recording,
+  at the playback volume.
+- Cardputer ADV: the speaker is set up anew for every playback - the ES8311 codec is reset and its whole
+  playback path configured (clocks, 16-bit input, DAC power, output driver, unmute) while the I2S clock runs.
+  Before, after a recording the speaker only popped and stayed silent.
+- Cardputer ADV: no more hiss from the speaker after playback - the DAC is muted and powered down before its
+  clock stops.
+
 ## 1.3.0 – 2026-10-25
 
 - **Auto level**: recordings that came out too quiet to hear (distant or soft voice, low mic gain, no calibration)
