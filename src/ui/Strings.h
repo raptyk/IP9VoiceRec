@@ -76,6 +76,7 @@ constexpr const char* kRecordsEverything = "records everything";
 constexpr const char* kBytesAutoLevel = "%s, auto %+d";  // file size, Auto level gain in dB
 constexpr const char* kSpaceLeft = "%s left";
 constexpr const char* kFooterRecord = "[ ] sensitivity  - = gain  tab help";
+constexpr const char* kLockedMessage = "Working...";
 constexpr const char* kToastSensitivity = "Sensitivity %u: %s";
 constexpr const char* kToastGain = "Mic gain +%d dB";
 constexpr const char* kToastVoiceOn = "Voice activation on: silence is skipped";
@@ -169,6 +170,8 @@ constexpr const char* kSetScreenOff = "Screen off after";
 constexpr const char* kSetScreenOffText = "Recording goes on with the screen off. Any key wakes it up.";
 constexpr const char* kSetStatusLed = "Status light";
 constexpr const char* kSetStatusLedText = "Red = voice recorded, pulsing = listening, amber = paused.";
+constexpr const char* kSetLock = "Lock when recording";
+constexpr const char* kSetLockText = "Screen and light off while recording. Keys show Working..., esc unlocks.";
 constexpr const char* kSetMicCheck = "Mic check";
 constexpr const char* kSetMicCheckText = "Level meter and calibration of gain and sensitivity.";
 constexpr const char* kSetStorage = "SD card";

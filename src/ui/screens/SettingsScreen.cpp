@@ -122,6 +122,12 @@ std::unique_ptr<ListScreen> makeSettingsScreen(App& app) {
                          changed();
                      },
                      str::kSetStatusLedText});
+    items.push_back({str::kSetLock, [&s]() { return onOff(s.lockWhileRecording); }, nullptr,
+                     [&s, changed](int) {
+                         s.lockWhileRecording = !s.lockWhileRecording;
+                         changed();
+                     },
+                     str::kSetLockText});
     items.push_back({str::kSetMicCheck, nullptr, [&app]() { app.push(std::make_unique<MicCheckScreen>(app)); },
                      nullptr, str::kSetMicCheckText});
     items.push_back({str::kSetStorage,

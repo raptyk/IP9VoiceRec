@@ -29,6 +29,7 @@ struct Settings {
     uint8_t brightness = 160;
     uint16_t screenOffSec = 60;  // 0 = never
     bool statusLed = true;
+    bool lockWhileRecording = false;  // screen off and keys locked while recording, esc unlocks
 
     // Loads stored values; the first start picks the mic gain for the board.
     void load(bool cardputerAdv);

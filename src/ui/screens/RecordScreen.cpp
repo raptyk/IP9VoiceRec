@@ -19,6 +19,7 @@ constexpr int kMeterRowHeight = 16;
 constexpr int kKeyRowHeight = 18;
 constexpr uint32_t kPeakHoldMs = 600;
 constexpr float kPeakFallDbPerFrame = 1.5f;
+constexpr uint32_t kLockedMessageMs = 3000;
 
 // "rec_0007" from "/recordings/rec_0007.mp3".
 String displayName(const String& path) {
@@ -28,8 +29,49 @@ String displayName(const String& path) {
 }
 }  // namespace
 
+void RecordScreen::onEnter() {
+    // Also called when the help screen closes: lock only once, when the recording starts.
+    if (!entered_) {
+        entered_ = true;
+        if (app_.settings().lockWhileRecording) {
+            lock();
+        }
+    }
+}
+
+void RecordScreen::lock() {
+    locked_ = true;
+    showLockedMessage();
+}
+
+void RecordScreen::unlock() {
+    locked_ = false;
+    lockedMessageUntil_ = 0;
+    app_.applySettings();  // normal brightness and idle timeouts
+    app_.invalidate();
+}
+
+void RecordScreen::showLockedMessage() {
+    // No dimming / switching off by the shell while locked: the screen handles the backlight.
+    const Settings& settings = app_.settings();
+    lockedMessageUntil_ = millis() + kLockedMessageMs;
+    if (lockedMessageUntil_ == 0) {
+        lockedMessageUntil_ = 1;
+    }
+    app_.setDisplayPower(settings.brightness, 0, 0, false);  // the status light would give it away
+    app_.invalidate();
+}
+
 void RecordScreen::onKey(const KeyEvent& event) {
     if (stopping_) {
+        return;
+    }
+    if (locked_) {
+        if (event.code == keycode::kEsc && !event.repeat) {
+            unlock();
+        } else {
+            showLockedMessage();
+        }
         return;
     }
     Recorder& recorder = Recorder::instance();
@@ -116,6 +158,14 @@ void RecordScreen::tick() {
         finish();
         return;
     }
+    if (locked_) {
+        if (lockedMessageUntil_ != 0 && static_cast<int32_t>(millis() - lockedMessageUntil_) >= 0) {
+            lockedMessageUntil_ = 0;
+            app_.setDisplayPower(0, 0, 0, false);
+            app_.invalidate();
+        }
+        return;  // nothing live to redraw
+    }
     app_.invalidate();  // live meter and timers
 }
 
@@ -124,6 +174,9 @@ void RecordScreen::finish() {
     SdStorage& storage = SdStorage::instance();
     if (settingsChanged_) {
         app_.saveSettings();
+    }
+    if (locked_) {
+        unlock();  // the result (saved / error) must be visible
     }
 
     char text[96];
@@ -157,6 +210,10 @@ const char* RecordScreen::footer() const {
 }
 
 void RecordScreen::draw(M5Canvas& canvas, int top, int height) {
+    if (locked_) {
+        drawLocked(canvas, top, height);
+        return;
+    }
     canvas.fillRect(0, top, theme::kScreenWidth, height, theme::kTintRecord);
     drawBand(canvas, top);
     const int middleTop = top + kBandHeight;
@@ -164,6 +221,16 @@ void RecordScreen::draw(M5Canvas& canvas, int top, int height) {
     drawMiddle(canvas, middleTop, middleHeight);
     drawMeter(canvas, middleTop + middleHeight);
     drawKeyRow(canvas, top + height - kKeyRowHeight, kKeyRowHeight);
+}
+
+void RecordScreen::drawLocked(M5Canvas& canvas, int top, int height) {
+    using namespace theme;
+    canvas.fillRect(0, top, kScreenWidth, height, kBackground);
+    canvas.setFont(&fonts::Font2);
+    canvas.setTextSize(1);
+    canvas.setTextColor(kTextMuted);
+    canvas.setTextDatum(middle_center);
+    canvas.drawString(str::kLockedMessage, kScreenWidth / 2, top + height / 2);
 }
 
 void RecordScreen::drawBand(M5Canvas& canvas, int top) {

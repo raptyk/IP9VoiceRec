@@ -42,6 +42,7 @@ void Settings::load(bool cardputerAdv) {
     brightness = prefs.getUChar("bright", brightness);
     screenOffSec = prefs.getUShort("offSec", screenOffSec);
     statusLed = prefs.getBool("led", statusLed);
+    lockWhileRecording = prefs.getBool("lock", lockWhileRecording);
     prefs.end();
 }
 
@@ -61,6 +62,7 @@ void Settings::save() const {
     prefs.putUChar("bright", brightness);
     prefs.putUShort("offSec", screenOffSec);
     prefs.putBool("led", statusLed);
+    prefs.putBool("lock", lockWhileRecording);
     prefs.end();
 }
 
